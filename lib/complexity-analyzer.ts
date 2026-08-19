@@ -97,10 +97,6 @@ M = [number]`,
       return createFallbackAnalysis();
     }
 
-    const n = parseInt(nMatch[1]);
-    const e = parseInt(eMatch[1]);
-    const p = parseInt(pMatch[1]);
-    const m = parseInt(mMatch[1]);
     const testScenarios = 2 * p;
 
     console.log("\n🧮 FORMULA CALCULATION (McCabe Cyclomatic Complexity):");
