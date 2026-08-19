@@ -31,7 +31,7 @@ interface LatestAnalysis {
 export default function DashboardPage() {
   const router = useRouter();
   const [userEmail, setUserEmail] = useState("");
-  const [activeTab, setActiveTab] = useState<"analyze" | "history" | "user-stories" | "proposed-estimation" | "estimation" | "timeline" | "project-plans" | "about">("analyze");
+  const [activeTab, setActiveTab] = useState<"analyze" | "refine" | "history" | "user-stories" | "proposed-estimation" | "estimation" | "timeline" | "project-plans" | "about">("analyze");
   const [refreshHistory, setRefreshHistory] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isTransitioning, setIsTransitioning] = useState(false);
