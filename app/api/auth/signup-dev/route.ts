@@ -6,25 +6,15 @@ export async function POST(request: NextRequest) {
   try {
     const { email, password, mobile, organization, role } = await request.json();
 
-    // Create auth user via client
-    const { data: authData, error: authError } = await supabase.auth.signUp({
+    // Create auth user via server admin (not client-side)
+    const { data: authData, error: authError } = await supabaseServer.auth.admin.createUser({
       email,
       password,
+      email_confirm: true, // Auto-confirm for development
     });
 
     if (authError) throw authError;
     if (!authData.user) throw new Error("Failed to create user");
-
-    // Auto-confirm email for development
-    const { error: confirmError } = await supabaseServer.auth.admin.updateUserById(
-      authData.user.id,
-      { email_confirm: true }
-    );
-
-    if (confirmError) {
-      console.warn("Could not auto-confirm email:", confirmError);
-      // Don't fail, just warn
-    }
 
     // Create user profile
     const { error: profileError } = await supabaseServer
@@ -43,10 +33,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       user: authData.user,
-      message: "Signup successful with auto-confirmed email",
+      message: "Signup successful",
     });
   } catch (error) {
-    console.error("Dev signup error:", error);
+    console.error("Signup error:", error);
     return NextResponse.json(
       {
         success: false,
