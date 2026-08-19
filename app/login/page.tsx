@@ -37,12 +37,12 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         {/* Header */}
         <div className="text-center mb-8">
-          <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center mx-auto mb-4">
-            <span className="text-white font-bold text-lg">CC</span>
+          <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center mx-auto mb-4 shadow-lg">
+            <span className="text-white font-bold text-lg">🔨</span>
           </div>
-          <h1 className="text-3xl font-bold text-slate-900">Sign In</h1>
+          <h1 className="text-3xl font-bold text-slate-900">DeliveryForge</h1>
           <p className="text-slate-600 mt-2">
-            Analyze requirement complexity with science
+            AI-powered delivery planning with complexity analysis
           </p>
         </div>
 
