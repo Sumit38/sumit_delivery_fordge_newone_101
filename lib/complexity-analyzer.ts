@@ -31,29 +31,21 @@ export async function analyzeRequirementComplexity(
       messages: [
         {
           role: "user",
-          content: `Analyze this requirement using McCabe's Cyclomatic Complexity formula: M = E - N + 2P
+          content: `Use McCabe's formula M = E - N + 2P to analyze this requirement:
 
-Requirement:
 ${requirementText}
 
-INSTRUCTIONS:
-1. Count N (Nodes): Every state, decision point, operation, and endpoint. Include Start and End.
-2. Count E (Edges): Every transition between states. Include success, failure, and retry paths.
-3. Count P (Distinct Paths): Every unique execution route from Start to End. Count all combinations of:
-   - Different decision branches (yes/no at each choice)
-   - Loop variants (fail once vs fail twice vs fail 3x)
-   - Operation sequences (order matters)
-   - Error scenarios with retries
-4. Calculate M = E - N + 2P
+Count:
+- N = Nodes (states, decisions, Start, End)
+- E = Edges (all transitions, success/failure/retry paths)
+- P = Distinct paths (all unique routes from Start to End)
+- M = E - N + 2P
 
-RESPOND WITH ONLY THIS FORMAT - NOTHING ELSE:
-
-N = [count]
-E = [count]
-P = [count]
-M = [count]
-
-That's it. No explanation, no paths, no analysis text. Just the four numbers.`,
+Output exactly this, nothing else:
+N = [number]
+E = [number]
+P = [number]
+M = [number]`,
         },
       ],
     });
@@ -70,36 +62,38 @@ That's it. No explanation, no paths, no analysis text. Just the four numbers.`,
 
     console.log("\n📝 Claude Analysis:\n", fullText);
 
-    // Extract N, E, P, M - try multiple patterns for robustness
-    let nMatch = fullText.match(/N\s*=\s*(\d+)/);
-    let eMatch = fullText.match(/E\s*=\s*(\d+)/);
-    let pMatch = fullText.match(/P\s*=\s*(\d+)/);
-    let mMatch = fullText.match(/M\s*=\s*(\d+)/);
+    // Aggressive extraction - try many formats
+    const extractNumber = (pattern: RegExp) => {
+      const match = fullText.match(pattern);
+      return match ? parseInt(match[1]) : null;
+    };
 
-    // Try extracting from FINAL ANSWER section if standard patterns fail
-    if (!nMatch) nMatch = fullText.match(/===== FINAL ANSWER[\s\S]*?N\s*=\s*(\d+)/);
-    if (!eMatch) eMatch = fullText.match(/===== FINAL ANSWER[\s\S]*?E\s*=\s*(\d+)/);
-    if (!pMatch) pMatch = fullText.match(/===== FINAL ANSWER[\s\S]*?P\s*=\s*(\d+)/);
-    if (!mMatch) mMatch = fullText.match(/===== FINAL ANSWER[\s\S]*?M\s*=\s*(\d+)/);
+    // Extract N - try multiple formats
+    let n = extractNumber(/^N\s*[:=]\s*(\d+)/im);
+    if (n === null) n = extractNumber(/N\s*[:=]\s*(\d+)/);
+    if (n === null) n = extractNumber(/Nodes?.*?(\d+)/i);
 
-    // Try alternative formats with asterisks or bold markdown
-    if (!nMatch) nMatch = fullText.match(/\*\*N\s*=\s*(\d+)\*\*/);
-    if (!eMatch) eMatch = fullText.match(/\*\*E\s*=\s*(\d+)\*\*/);
-    if (!pMatch) pMatch = fullText.match(/\*\*P\s*=\s*(\d+)\*\*/);
-    if (!mMatch) mMatch = fullText.match(/\*\*M\s*=\s*(\d+)\*\*/);
+    // Extract E - try multiple formats
+    let e = extractNumber(/^E\s*[:=]\s*(\d+)/im);
+    if (e === null) e = extractNumber(/E\s*[:=]\s*(\d+)/);
+    if (e === null) e = extractNumber(/Edges?.*?(\d+)/i);
 
-    if (!nMatch || !eMatch || !pMatch || !mMatch) {
-      console.log(
-        "⚠️ Could not extract N, E, P, M. Using fallback analysis."
-      );
-      console.log("Expected format: N = X, E = X, P = X, M = X");
-      console.log("\n🔍 What we found:");
-      console.log(`  N Match: ${nMatch ? nMatch[1] : "NOT FOUND"}`);
-      console.log(`  E Match: ${eMatch ? eMatch[1] : "NOT FOUND"}`);
-      console.log(`  P Match: ${pMatch ? pMatch[1] : "NOT FOUND"}`);
-      console.log(`  M Match: ${mMatch ? mMatch[1] : "NOT FOUND"}`);
-      console.log("\n📋 Claude response last 500 chars:");
-      console.log(fullText.slice(-500));
+    // Extract P - try multiple formats
+    let p = extractNumber(/^P\s*[:=]\s*(\d+)/im);
+    if (p === null) p = extractNumber(/P\s*[:=]\s*(\d+)/);
+    if (p === null) p = extractNumber(/Paths?.*?(\d+)/i);
+
+    // Extract M - try multiple formats
+    let m = extractNumber(/^M\s*[:=]\s*(\d+)/im);
+    if (m === null) m = extractNumber(/M\s*[:=]\s*(\d+)/);
+    if (m === null) m = extractNumber(/Complexity.*?(\d+)/i);
+
+    // Validate extraction
+    if (n === null || e === null || p === null || m === null) {
+      console.log("⚠️ Could not extract values. Found:");
+      console.log(`  N: ${n}, E: ${e}, P: ${p}, M: ${m}`);
+      console.log("\n📋 Full Claude response:");
+      console.log(fullText);
       return createFallbackAnalysis();
     }
 
