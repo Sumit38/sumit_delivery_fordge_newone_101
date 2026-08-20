@@ -88,9 +88,6 @@ export async function GET(request: NextRequest) {
           paths: analysisData.alternativePaths || 1,
           createdAt: req.created_at,
           requirementText: req.document_text || "",
-          actualNodes: analysisData.nodes || [],
-          actualEdges: analysisData.edges || [],
-          actualPaths: analysisData.paths || [],
         };
       });
 
