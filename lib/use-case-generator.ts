@@ -9,6 +9,7 @@ interface UseCaseData {
   nodesCount: number;
   edgesCount: number;
   paths: number;
+  analysisId?: string;
 }
 
 interface UseCaseQA {
@@ -283,6 +284,10 @@ function buildUseCaseHTML(useCaseTitle: string, useCaseQA: UseCaseQA | null): st
 export async function generateUseCasePDF(data: UseCaseData): Promise<void> {
   let useCaseQA: UseCaseQA | null = null;
 
+  // Clear any old use case data from sessionStorage to prevent caching issues
+  const cacheKey = `usecase_${data.analysisId || data.requirementTitle}`;
+  sessionStorage.removeItem(cacheKey);
+
   try {
     const response = await fetch("/api/generate-use-case-qa", {
       method: "POST",
@@ -290,6 +295,7 @@ export async function generateUseCasePDF(data: UseCaseData): Promise<void> {
       body: JSON.stringify({
         requirementText: data.requirementText,
         requirementTitle: data.requirementTitle,
+        analysisId: data.analysisId || data.requirementTitle,
       }),
     });
 

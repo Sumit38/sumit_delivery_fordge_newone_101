@@ -14,6 +14,7 @@ interface DownloadUseCaseButtonProps {
   nodesCount: number;
   edgesCount: number;
   paths: number;
+  analysisId?: string;
 }
 
 export default function DownloadUseCaseButton({
@@ -27,6 +28,7 @@ export default function DownloadUseCaseButton({
   nodesCount,
   edgesCount,
   paths,
+  analysisId,
 }: DownloadUseCaseButtonProps) {
   const [isGenerating, setIsGenerating] = useState(false);
 
@@ -44,6 +46,7 @@ export default function DownloadUseCaseButton({
         nodesCount,
         edgesCount,
         paths,
+        analysisId: analysisId || requirementTitle,
       });
     } catch (error) {
       console.error("Error generating PDF:", error);

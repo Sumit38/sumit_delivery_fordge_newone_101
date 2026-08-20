@@ -206,6 +206,7 @@ export default function DashboardPage() {
                 nodesCount={latestAnalysis.nodesCount || 0}
                 edgesCount={latestAnalysis.edgesCount || 0}
                 paths={latestAnalysis.paths || 1}
+                analysisId={latestAnalysis.id}
               />
             )}
             <button
