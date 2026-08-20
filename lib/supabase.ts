@@ -1,9 +1,29 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+let cachedClient: any = null;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+function getClient() {
+  if (!cachedClient) {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      throw new Error("Missing Supabase credentials");
+    }
+
+    cachedClient = createClient(supabaseUrl, supabaseAnonKey);
+  }
+  return cachedClient;
+}
+
+// Create a proxy that defers client creation to runtime
+export const supabase = new Proxy({}, {
+  get: (target, prop) => {
+    const client = getClient();
+    const value = client[prop as string];
+    return typeof value === "function" ? value.bind(client) : value;
+  },
+}) as any;
 
 export type Database = {
   public: {
