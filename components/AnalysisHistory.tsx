@@ -17,6 +17,9 @@ interface Analysis {
   requirementText?: string;
   qaManDays?: number;
   devManDays?: number;
+  actualNodes?: string[];
+  actualEdges?: Array<{ from: string; to: string; condition?: string }>;
+  actualPaths?: string[][];
 }
 
 interface AnalysisHistoryProps {
@@ -344,6 +347,9 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
                     paths={selectedAnalysis.paths || 1}
                     complexityScore={selectedAnalysis.complexityScore}
                     title={selectedAnalysis.title}
+                    actualNodes={selectedAnalysis.actualNodes}
+                    actualEdges={selectedAnalysis.actualEdges}
+                    actualPaths={selectedAnalysis.actualPaths}
                   />
 
                   <div className="space-y-4">

@@ -9,8 +9,6 @@ import RefineRequirement from "@/components/RefineRequirement";
 import AnalysisHistory from "@/components/AnalysisHistory";
 import EstimationHistory from "@/components/EstimationHistory";
 import SuggestiveUserStories from "@/components/SuggestiveUserStories";
-import ProposedProjectTimeline from "@/components/ProposedProjectTimeline";
-import ProjectPlansHistory from "@/components/ProjectPlansHistory";
 import AboutPage from "@/components/AboutPage";
 import DownloadUseCaseButton from "@/components/DownloadUseCaseButton";
 import RequirementSelector from "@/components/RequirementSelector";
@@ -31,7 +29,7 @@ interface LatestAnalysis {
 export default function DashboardPage() {
   const router = useRouter();
   const [userEmail, setUserEmail] = useState("");
-  const [activeTab, setActiveTab] = useState<"analyze" | "refine" | "history" | "user-stories" | "proposed-estimation" | "estimation" | "timeline" | "project-plans" | "about">("analyze");
+  const [activeTab, setActiveTab] = useState<"analyze" | "refine" | "history" | "user-stories" | "proposed-estimation" | "estimation" | "about">("analyze");
   const [refreshHistory, setRefreshHistory] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -270,38 +268,6 @@ export default function DashboardPage() {
             >
               Estimation History
             </button>
-            <button
-              onClick={() => {
-                setIsTransitioning(true);
-                setTimeout(() => {
-                  setActiveTab("timeline");
-                  setIsTransitioning(false);
-                }, 300);
-              }}
-              className={`px-4 py-2 font-medium transition-colors whitespace-nowrap text-sm ${
-                activeTab === "timeline"
-                  ? "text-blue-600 border-b-2 border-blue-600"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Project Timeline
-            </button>
-            <button
-              onClick={() => {
-                setIsTransitioning(true);
-                setTimeout(() => {
-                  setActiveTab("project-plans");
-                  setIsTransitioning(false);
-                }, 300);
-              }}
-              className={`px-4 py-2 font-medium transition-colors whitespace-nowrap text-sm ${
-                activeTab === "project-plans"
-                  ? "text-blue-600 border-b-2 border-blue-600"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Project Plans History
-            </button>
           </div>
           <button
             onClick={() => {
@@ -487,38 +453,6 @@ export default function DashboardPage() {
           </div>
         ) : activeTab === "estimation" ? (
           <EstimationHistory key={String(refreshHistory)} />
-        ) : activeTab === "timeline" ? (
-          <div>
-            {latestAnalysis ? (
-              <ProposedProjectTimeline
-                qaManDays={latestAnalysis.qaManDays}
-                devManDays={latestAnalysis.devManDays}
-                complexityScore={latestAnalysis.complexityScore}
-                analysisId={latestAnalysis.id}
-              />
-            ) : (
-              <div className="p-6 bg-white rounded-lg border border-slate-200 shadow-sm">
-                <p className="text-slate-600">
-                  No analysis results yet. Please complete an analysis in the{" "}
-                  <button
-                    onClick={() => {
-                      setIsTransitioning(true);
-                      setTimeout(() => {
-                        setActiveTab("history");
-                        setIsTransitioning(false);
-                      }, 300);
-                    }}
-                    className="text-blue-600 hover:text-blue-700 font-semibold"
-                  >
-                    Analysis History
-                  </button>{" "}
-                  tab to view the project timeline.
-                </p>
-              </div>
-            )}
-          </div>
-        ) : activeTab === "project-plans" ? (
-          <ProjectPlansHistory />
         ) : activeTab === "about" ? (
           <AboutPage />
         ) : null}

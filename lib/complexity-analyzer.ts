@@ -26,7 +26,7 @@ export async function analyzeRequirementComplexity(
 
     const response = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 5000,
+      max_tokens: 8000,
       temperature: 0,
       messages: [
         {
@@ -35,13 +35,28 @@ export async function analyzeRequirementComplexity(
 
 ${requirementText}
 
-Count:
+First, identify all nodes and edges, then calculate:
 - N = Nodes (states, decisions, Start, End)
 - E = Edges (all transitions, success/failure/retry paths)
 - P = Distinct paths (all unique routes from Start to End)
 - M = E - N + 2P
 
-Output exactly this, nothing else:
+Output in this format:
+NODES:
+- Start
+- [list each node/state]
+- End
+
+EDGES:
+- Start -> [node1] (condition if any)
+- [list each edge with from -> to]
+
+PATHS:
+- [list path 1]
+- [list path 2]
+- [list each distinct path]
+
+CALCULATION:
 N = [number]
 E = [number]
 P = [number]
@@ -62,6 +77,47 @@ M = [number]`,
 
     console.log("\n📝 Claude Analysis:\n", fullText);
 
+    // Parse nodes
+    const nodesMatch = fullText.match(/NODES:\s*([\s\S]*?)(?=EDGES:|$)/i);
+    const nodesList = nodesMatch
+      ? nodesMatch[1]
+          .split("\n")
+          .map((line) => line.replace(/^[-•]\s*/, "").trim())
+          .filter((line) => line.length > 0)
+      : [];
+
+    // Parse edges
+    const edgesMatch = fullText.match(/EDGES:\s*([\s\S]*?)(?=PATHS:|$)/i);
+    const edgesList: Array<{ from: string; to: string; condition?: string }> = [];
+    if (edgesMatch) {
+      const edgeLines = edgesMatch[1].split("\n");
+      edgeLines.forEach((line) => {
+        const cleaned = line.replace(/^[-•]\s*/, "").trim();
+        const edgeRegex = /^(.*?)\s*->\s*(.+?)(?:\s*\((.+?)\))?$/;
+        const match = cleaned.match(edgeRegex);
+        if (match) {
+          edgesList.push({
+            from: match[1].trim(),
+            to: match[2].trim(),
+            condition: match[3]?.trim(),
+          });
+        }
+      });
+    }
+
+    // Parse paths
+    const pathsMatch = fullText.match(/PATHS:\s*([\s\S]*?)(?=CALCULATION:|$)/i);
+    const pathsList: string[][] = [];
+    if (pathsMatch) {
+      const pathLines = pathsMatch[1].split("\n");
+      pathLines.forEach((line) => {
+        const cleaned = line.replace(/^[-•]\s*/, "").trim();
+        if (cleaned.length > 0) {
+          pathsList.push(cleaned.split("->").map((p) => p.trim()));
+        }
+      });
+    }
+
     // Aggressive extraction - try many formats
     const extractNumber = (pattern: RegExp) => {
       const match = fullText.match(pattern);
@@ -71,17 +127,17 @@ M = [number]`,
     // Extract N - try multiple formats
     let n = extractNumber(/^N\s*[:=]\s*(\d+)/im);
     if (n === null) n = extractNumber(/N\s*[:=]\s*(\d+)/);
-    if (n === null) n = extractNumber(/Nodes?.*?(\d+)/i);
+    if (n === null) n = nodesList.length || extractNumber(/Nodes?.*?(\d+)/i);
 
     // Extract E - try multiple formats
     let e = extractNumber(/^E\s*[:=]\s*(\d+)/im);
     if (e === null) e = extractNumber(/E\s*[:=]\s*(\d+)/);
-    if (e === null) e = extractNumber(/Edges?.*?(\d+)/i);
+    if (e === null) e = edgesList.length || extractNumber(/Edges?.*?(\d+)/i);
 
     // Extract P - try multiple formats
     let p = extractNumber(/^P\s*[:=]\s*(\d+)/im);
     if (p === null) p = extractNumber(/P\s*[:=]\s*(\d+)/);
-    if (p === null) p = extractNumber(/Paths?.*?(\d+)/i);
+    if (p === null) p = pathsList.length || extractNumber(/Paths?.*?(\d+)/i);
 
     // Extract M - try multiple formats
     let m = extractNumber(/^M\s*[:=]\s*(\d+)/im);
@@ -110,16 +166,18 @@ M = [number]`,
     console.log(`✅ TEST SCENARIOS REQUIRED (2P): ${testScenarios}\n`);
 
     return {
-      nodes: [],
-      edges: [],
-      paths: [],
+      nodes: nodesList,
+      edges: edgesList,
+      paths: pathsList,
       nodesCount: n,
       edgesCount: e,
       connectedComponents: p,
       complexityScore: m,
       testScenarios: testScenarios,
       analysis: `N=${n}, E=${e}, P=${p} → M = ${e} - ${n} + 2(${p}) = ${m}`,
-      decisionPoints: [],
+      decisionPoints: nodesList.filter(
+        (node) => node.toLowerCase().includes("decision") || node.toLowerCase().includes("check")
+      ),
       alternativePaths: p,
     };
   } catch (error) {
