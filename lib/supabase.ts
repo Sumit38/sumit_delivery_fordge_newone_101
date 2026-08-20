@@ -61,6 +61,7 @@ export type Database = {
           role: string;
           email: string;
           created_at: string;
+          preferences?: Record<string, any>;
         };
         Insert: {
           clerk_id: string;
@@ -68,11 +69,13 @@ export type Database = {
           organization: string;
           role: string;
           email: string;
+          preferences?: Record<string, any>;
         };
         Update: {
           mobile?: string;
           organization?: string;
           role?: string;
+          preferences?: Record<string, any>;
         };
       };
       requirements: {

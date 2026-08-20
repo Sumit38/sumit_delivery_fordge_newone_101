@@ -9,6 +9,7 @@ import RefineRequirement from "@/components/RefineRequirement";
 import AnalysisHistory from "@/components/AnalysisHistory";
 import EstimationHistory from "@/components/EstimationHistory";
 import SuggestiveUserStories from "@/components/SuggestiveUserStories";
+import ProposedProjectTimeline from "@/components/ProposedProjectTimeline";
 import AboutPage from "@/components/AboutPage";
 import DownloadUseCaseButton from "@/components/DownloadUseCaseButton";
 import RequirementSelector from "@/components/RequirementSelector";
@@ -29,11 +30,13 @@ interface LatestAnalysis {
 export default function DashboardPage() {
   const router = useRouter();
   const [userEmail, setUserEmail] = useState("");
-  const [activeTab, setActiveTab] = useState<"analyze" | "refine" | "history" | "user-stories" | "proposed-estimation" | "estimation" | "about">("analyze");
+  const [activeTab, setActiveTab] = useState<"analyze" | "refine" | "history" | "user-stories" | "proposed-estimation" | "estimation" | "timeline" | "about">("analyze");
   const [refreshHistory, setRefreshHistory] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [latestAnalysis, setLatestAnalysis] = useState<LatestAnalysis | null>(null);
+  const [timelineEnabled, setTimelineEnabled] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -45,6 +48,23 @@ export default function DashboardPage() {
       }
 
       setUserEmail(session.user.email || "User");
+
+      // Fetch user preferences
+      try {
+        const response = await fetch("/api/user-preferences", {
+          headers: {
+            "Authorization": `Bearer ${session.access_token}`,
+          },
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setTimelineEnabled(data.preferences?.timeline_enabled || false);
+        }
+      } catch (err) {
+        console.error("Error fetching preferences:", err);
+      }
+
       setLoading(false);
     };
 
@@ -123,6 +143,33 @@ export default function DashboardPage() {
     router.push("/login");
   };
 
+  const toggleTimelineFeature = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const newValue = !timelineEnabled;
+      const response = await fetch("/api/user-preferences", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          preferences: {
+            timeline_enabled: newValue,
+          },
+        }),
+      });
+
+      if (response.ok) {
+        setTimelineEnabled(newValue);
+      }
+    } catch (err) {
+      alert("Failed to update preference: " + (err instanceof Error ? err.message : "Unknown error"));
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
@@ -162,6 +209,13 @@ export default function DashboardPage() {
               />
             )}
             <button
+              onClick={() => setShowSettings(!showSettings)}
+              className="px-4 py-2 text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+              title="Settings"
+            >
+              ⚙️
+            </button>
+            <button
               onClick={handleSignOut}
               className="px-4 py-2 text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
             >
@@ -170,6 +224,56 @@ export default function DashboardPage() {
           </div>
         </div>
       </header>
+
+      {/* Settings Panel */}
+      {showSettings && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 shadow-lg w-96">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-slate-900">Dashboard Settings</h2>
+              <button
+                onClick={() => setShowSettings(false)}
+                className="text-2xl font-light text-slate-500 hover:text-slate-700"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-semibold text-slate-900">Project Timeline (Gantt Chart)</p>
+                    <p className="text-sm text-slate-600 mt-1">
+                      {timelineEnabled ? "✅ Enabled" : "❌ Disabled"}
+                    </p>
+                  </div>
+                  <button
+                    onClick={toggleTimelineFeature}
+                    className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+                      timelineEnabled
+                        ? "bg-red-600 text-white hover:bg-red-700"
+                        : "bg-green-600 text-white hover:bg-green-700"
+                    }`}
+                  >
+                    {timelineEnabled ? "Disable" : "Enable"}
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500 mt-3">
+                  Show or hide the Project Timeline tab from your dashboard
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setShowSettings(false)}
+              className="w-full mt-6 px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 font-semibold transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Loading Overlay */}
       {isTransitioning && (
@@ -268,6 +372,24 @@ export default function DashboardPage() {
             >
               Estimation History
             </button>
+            {timelineEnabled && (
+              <button
+                onClick={() => {
+                  setIsTransitioning(true);
+                  setTimeout(() => {
+                    setActiveTab("timeline");
+                    setIsTransitioning(false);
+                  }, 300);
+                }}
+                className={`px-4 py-2 font-medium transition-colors whitespace-nowrap text-sm ${
+                  activeTab === "timeline"
+                    ? "text-blue-600 border-b-2 border-blue-600"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Project Timeline
+              </button>
+            )}
           </div>
           <button
             onClick={() => {
@@ -453,6 +575,36 @@ export default function DashboardPage() {
           </div>
         ) : activeTab === "estimation" ? (
           <EstimationHistory key={String(refreshHistory)} />
+        ) : activeTab === "timeline" ? (
+          <div>
+            {latestAnalysis ? (
+              <ProposedProjectTimeline
+                qaManDays={latestAnalysis.qaManDays}
+                devManDays={latestAnalysis.devManDays}
+                complexityScore={latestAnalysis.complexityScore}
+                analysisId={latestAnalysis.id}
+              />
+            ) : (
+              <div className="p-6 bg-white rounded-lg border border-slate-200 shadow-sm">
+                <p className="text-slate-600">
+                  No analysis results yet. Please complete an analysis in the{" "}
+                  <button
+                    onClick={() => {
+                      setIsTransitioning(true);
+                      setTimeout(() => {
+                        setActiveTab("history");
+                        setIsTransitioning(false);
+                      }, 300);
+                    }}
+                    className="text-blue-600 hover:text-blue-700 font-semibold"
+                  >
+                    Analysis History
+                  </button>{" "}
+                  tab to view the project timeline.
+                </p>
+              </div>
+            )}
+          </div>
         ) : activeTab === "about" ? (
           <AboutPage />
         ) : null}
