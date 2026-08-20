@@ -23,6 +23,8 @@ interface UserStoriesProps {
   analysisId?: string;
 }
 
+type EstimationMethod = "fibonacci" | "planning-poker" | "tshirt";
+
 export default function SuggestiveUserStories({ requirementText, complexityLevel, analysisId }: UserStoriesProps) {
   const [stories, setStories] = useState<UserStory[]>([]);
   const [summary, setSummary] = useState("");
@@ -31,6 +33,7 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
   const [expandedStory, setExpandedStory] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [estimationMethod, setEstimationMethod] = useState<EstimationMethod>("fibonacci");
 
   useEffect(() => {
     generateStories();
@@ -129,6 +132,32 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
     }
   };
 
+  const convertStoryPoints = (fibonacciPoints: number, method: EstimationMethod): string | number => {
+    switch (method) {
+      case "fibonacci":
+        return fibonacciPoints;
+      case "planning-poker":
+        // Planning Poker: 0, 0.5, 1, 2, 3, 5, 8, 13, 20, 40, 100, ∞
+        const pokerScale = [0, 0.5, 1, 2, 3, 5, 8, 13, 20, 40, 100];
+        if (fibonacciPoints <= 1) return pokerScale[1];
+        if (fibonacciPoints <= 2) return pokerScale[2];
+        if (fibonacciPoints <= 3) return pokerScale[4];
+        if (fibonacciPoints <= 5) return pokerScale[5];
+        if (fibonacciPoints <= 8) return pokerScale[6];
+        if (fibonacciPoints <= 13) return pokerScale[7];
+        return pokerScale[8];
+      case "tshirt":
+        // T-Shirt: XS, S, M, L, XL
+        if (fibonacciPoints <= 1) return "XS";
+        if (fibonacciPoints <= 2) return "S";
+        if (fibonacciPoints <= 5) return "M";
+        if (fibonacciPoints <= 8) return "L";
+        return "XL";
+      default:
+        return fibonacciPoints;
+    }
+  };
+
   const getPriorityColor = (priority: string) => {
     switch (priority) {
       case "Must-Have":
@@ -185,6 +214,78 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
 
   return (
     <div className="space-y-6">
+      {/* Estimation Method Selector */}
+      <div className="p-4 bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg">
+        <div className="space-y-3">
+          <div>
+            <p className="font-semibold text-slate-900 mb-2">📊 Estimation Method</p>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                onClick={() => setEstimationMethod("fibonacci")}
+                className={`px-4 py-2 rounded-lg font-medium transition-all text-sm ${
+                  estimationMethod === "fibonacci"
+                    ? "bg-blue-600 text-white ring-2 ring-blue-400"
+                    : "bg-white text-slate-700 border border-slate-200 hover:border-slate-300"
+                }`}
+              >
+                Fibonacci
+              </button>
+              <button
+                onClick={() => setEstimationMethod("planning-poker")}
+                className={`px-4 py-2 rounded-lg font-medium transition-all text-sm ${
+                  estimationMethod === "planning-poker"
+                    ? "bg-blue-600 text-white ring-2 ring-blue-400"
+                    : "bg-white text-slate-700 border border-slate-200 hover:border-slate-300"
+                }`}
+              >
+                Planning Poker
+              </button>
+              <button
+                onClick={() => setEstimationMethod("tshirt")}
+                className={`px-4 py-2 rounded-lg font-medium transition-all text-sm ${
+                  estimationMethod === "tshirt"
+                    ? "bg-blue-600 text-white ring-2 ring-blue-400"
+                    : "bg-white text-slate-700 border border-slate-200 hover:border-slate-300"
+                }`}
+              >
+                T-Shirt
+              </button>
+            </div>
+          </div>
+
+          {/* Method Explanation */}
+          <div className="bg-white rounded-lg p-3 text-xs space-y-2 border border-slate-100">
+            {estimationMethod === "fibonacci" && (
+              <div>
+                <p className="font-semibold text-slate-900">Fibonacci Sequence (1, 2, 3, 5, 8, 13)</p>
+                <p className="text-slate-600">
+                  ✓ Most popular in Agile. Uses natural numbers that increase exponentially, reflecting uncertainty in larger tasks.
+                  <br/>ℹ️ <strong>Use when:</strong> You want precise estimation with built-in uncertainty accommodation.
+                </p>
+              </div>
+            )}
+            {estimationMethod === "planning-poker" && (
+              <div>
+                <p className="font-semibold text-slate-900">Planning Poker (0.5, 1, 2, 3, 5, 8, 13, 20, 40, 100)</p>
+                <p className="text-slate-600">
+                  ✓ Used in formal Planning Poker sessions. Includes fractional and very large values for extreme cases.
+                  <br/>ℹ️ <strong>Use when:</strong> Team uses Planning Poker game for collaborative estimation.
+                </p>
+              </div>
+            )}
+            {estimationMethod === "tshirt" && (
+              <div>
+                <p className="font-semibold text-slate-900">T-Shirt Sizing (XS, S, M, L, XL)</p>
+                <p className="text-slate-600">
+                  ✓ Simple & intuitive. Great for initial rough estimation or non-technical stakeholders.
+                  <br/>ℹ️ <strong>Use when:</strong> You want quick, easy-to-understand sizing without numeric details.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Summary */}
       {summary && (
         <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
@@ -242,7 +343,10 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
                 <h3 className="font-bold text-slate-900 text-sm">{story.title}</h3>
               </div>
               <div className="text-right ml-2">
-                <p className="text-sm font-bold text-slate-900">{story.storyPoints}pt</p>
+                <p className="text-sm font-bold text-slate-900">
+                  {convertStoryPoints(story.storyPoints, estimationMethod)}
+                  {estimationMethod === "fibonacci" ? "pt" : estimationMethod === "planning-poker" ? "pt" : ""}
+                </p>
                 <p className="text-xs text-slate-600">{story.estimatedDays}d</p>
               </div>
             </div>
