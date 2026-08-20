@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect } from "react";
 
 interface ComplexityFlowDiagramProps {
   nodesCount: number;
@@ -17,55 +17,55 @@ export default function ComplexityFlowDiagram({
   complexityScore,
   title,
 }: ComplexityFlowDiagramProps) {
+  const diagramId = `mermaid-${Date.now()}`;
+
+  useEffect(() => {
+    const loadMermaid = async () => {
+      const mermaid = (await import("mermaid")).default;
+      mermaid.initialize({ startOnLoad: true, theme: "default" });
+      mermaid.contentLoaded();
+    };
+
+    loadMermaid().catch(console.error);
+  }, []);
+
   // Generate Mermaid diagram based on N, E, P values
   const generateMermaidDiagram = () => {
-    // Simplified flowchart showing the control flow
-    // N = nodes, E = edges, P = paths
-
-    const decisionPoints = Math.min(Math.floor(nodesCount / 3), 4); // 3-4 decision points
-    const pathsPerDecision = Math.ceil(paths / Math.max(1, decisionPoints));
+    const decisionPoints = Math.min(Math.floor(nodesCount / 3), 4);
 
     let mermaidCode = `graph TD\n`;
-    mermaidCode += `    Start([START: Input Processing])\n`;
+    mermaidCode += `    Start([🟢 START<br/>Input Processing])\n`;
 
-    // Add decision points
     for (let i = 1; i <= decisionPoints; i++) {
-      mermaidCode += `    Decision${i}{Decision Point ${i}}\n`;
+      mermaidCode += `    Decision${i}{🔵 Decision ${i}}\n`;
     }
 
-    // Add path branches
     for (let i = 1; i <= Math.min(paths, 5); i++) {
-      mermaidCode += `    Path${i}[Path ${i}<br/>Success/Failure]\n`;
+      mermaidCode += `    Path${i}["🛤️ Path ${i}<br/>Success/Failure"]\n`;
     }
 
-    mermaidCode += `    End([END: Result Output])\n\n`;
+    mermaidCode += `    End([🔴 END<br/>Result Output])\n\n`;
 
-    // Add edges/connections
     mermaidCode += `    Start --> Decision1\n`;
 
-    // Connect decisions
     for (let i = 1; i < decisionPoints; i++) {
       mermaidCode += `    Decision${i} --> Decision${i + 1}\n`;
     }
 
-    // Connect to paths
     for (let i = 1; i <= Math.min(paths, 5); i++) {
       const decision = Math.min(i, decisionPoints);
       mermaidCode += `    Decision${decision} --> Path${i}\n`;
     }
 
-    // Connect paths to end
     for (let i = 1; i <= Math.min(paths, 5); i++) {
       mermaidCode += `    Path${i} --> End\n`;
     }
 
-    // Add styling
     mermaidCode += `\n    style Start fill:#90EE90,stroke:#228B22,stroke-width:3px,color:#000\n`;
     mermaidCode += `    style End fill:#FFB6C6,stroke:#DC143C,stroke-width:3px,color:#000\n`;
-    mermaidCode += `    style Decision1 fill:#87CEEB,stroke:#1E90FF,stroke-width:2px,color:#000\n`;
-    mermaidCode += `    style Decision2 fill:#87CEEB,stroke:#1E90FF,stroke-width:2px,color:#000\n`;
-    mermaidCode += `    style Decision3 fill:#87CEEB,stroke:#1E90FF,stroke-width:2px,color:#000\n`;
-    mermaidCode += `    style Decision4 fill:#87CEEB,stroke:#1E90FF,stroke-width:2px,color:#000\n`;
+    for (let i = 1; i <= decisionPoints; i++) {
+      mermaidCode += `    style Decision${i} fill:#87CEEB,stroke:#1E90FF,stroke-width:2px,color:#000\n`;
+    }
 
     return mermaidCode;
   };
@@ -76,8 +76,7 @@ export default function ComplexityFlowDiagram({
 
       {/* Mermaid Diagram */}
       <div className="bg-white rounded-lg p-4 border border-slate-200 overflow-x-auto">
-        <script async src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
-        <div className="mermaid">
+        <div className="mermaid" id={diagramId}>
           {generateMermaidDiagram()}
         </div>
       </div>
