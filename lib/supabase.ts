@@ -7,8 +7,9 @@ function getClient() {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
+    // During build time, return a dummy object to prevent errors
     if (!supabaseUrl || !supabaseAnonKey) {
-      throw new Error("Missing Supabase credentials");
+      return {};
     }
 
     cachedClient = createClient(supabaseUrl, supabaseAnonKey);
