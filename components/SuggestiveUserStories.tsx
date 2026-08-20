@@ -309,7 +309,16 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
           <p className="text-2xl font-bold text-slate-900">
             {estimationMethod === "tshirt"
               ? `${stories.filter(s => convertStoryPoints(s.storyPoints, estimationMethod) === "XS").length}XS, ${stories.filter(s => convertStoryPoints(s.storyPoints, estimationMethod) === "S").length}S, ${stories.filter(s => convertStoryPoints(s.storyPoints, estimationMethod) === "M").length}M, ${stories.filter(s => convertStoryPoints(s.storyPoints, estimationMethod) === "L").length}L, ${stories.filter(s => convertStoryPoints(s.storyPoints, estimationMethod) === "XL").length}XL`
-              : stories.reduce((sum, s) => sum + (convertStoryPoints(s.storyPoints, estimationMethod) as number), 0)
+              : (() => {
+                  let total = 0;
+                  for (const story of stories) {
+                    const converted = convertStoryPoints(story.storyPoints, estimationMethod);
+                    if (typeof converted === 'number') {
+                      total += converted;
+                    }
+                  }
+                  return total;
+                })()
             }
           </p>
           <p className="text-xs text-slate-600 mt-1">
