@@ -137,15 +137,19 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
       case "fibonacci":
         return fibonacciPoints;
       case "planning-poker":
-        // Planning Poker: 0, 0.5, 1, 2, 3, 5, 8, 13, 20, 40, 100, ∞
-        const pokerScale = [0, 0.5, 1, 2, 3, 5, 8, 13, 20, 40, 100];
-        if (fibonacciPoints <= 1) return pokerScale[1];
-        if (fibonacciPoints <= 2) return pokerScale[2];
-        if (fibonacciPoints <= 3) return pokerScale[4];
-        if (fibonacciPoints <= 5) return pokerScale[5];
-        if (fibonacciPoints <= 8) return pokerScale[6];
-        if (fibonacciPoints <= 13) return pokerScale[7];
-        return pokerScale[8];
+        // Planning Poker: Spread Fibonacci across full Planning Poker range
+        // Fibonacci 1 → Planning Poker 1
+        // Fibonacci 2 → Planning Poker 3
+        // Fibonacci 3 → Planning Poker 5
+        // Fibonacci 5 → Planning Poker 8
+        // Fibonacci 8 → Planning Poker 13
+        // Fibonacci 13 → Planning Poker 20
+        if (fibonacciPoints <= 1) return 1;
+        if (fibonacciPoints <= 2) return 3;
+        if (fibonacciPoints <= 3) return 5;
+        if (fibonacciPoints <= 5) return 8;
+        if (fibonacciPoints <= 8) return 13;
+        return 20;
       case "tshirt":
         // T-Shirt: XS, S, M, L, XL
         if (fibonacciPoints <= 1) return "XS";
