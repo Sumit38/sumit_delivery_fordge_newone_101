@@ -2,10 +2,40 @@ import { createClient } from '@supabase/supabase-js';
 
 let cachedClient: any = null;
 
+function getDummyClient() {
+  return {
+    auth: {
+      getSession: async () => ({ data: { session: null }, error: null }),
+      signInWithPassword: async () => ({ data: null, error: new Error('Auth unavailable') }),
+      signUp: async () => ({ data: null, error: new Error('Auth unavailable') }),
+      signOut: async () => ({ error: null }),
+    },
+    from: (table: string) => ({
+      select: (cols?: string) => ({
+        eq: (col: string, val: any) => ({
+          eq: (col2: string, val2: any) => ({
+            single: async () => ({ data: null, error: null }),
+          }),
+          single: async () => ({ data: null, error: null }),
+        }),
+      }),
+      insert: async () => ({ error: null }),
+      update: async () => ({ error: null }),
+      delete: async () => ({ error: null }),
+    }),
+  };
+}
+
 function getClient() {
   if (!cachedClient) {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    // Use dummy client if credentials missing (build-time or config issue)
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return getDummyClient();
+    }
+
     cachedClient = createClient(supabaseUrl, supabaseAnonKey);
   }
   return cachedClient;
