@@ -2,14 +2,30 @@ import { createClient } from '@supabase/supabase-js';
 
 let cachedClient: any = null;
 
+function getDummyClient() {
+  return {
+    auth: {
+      getSession: async () => ({ data: { session: null }, error: null }),
+      signInWithPassword: async () => ({ data: null, error: new Error('Not configured') }),
+      signUp: async () => ({ data: null, error: new Error('Not configured') }),
+      signOut: async () => ({ error: null }),
+    },
+    from: () => ({
+      select: () => ({ eq: () => ({ eq: () => ({ single: async () => ({ data: null, error: null }) }) }) }),
+      insert: async () => ({ error: null }),
+      update: async () => ({ error: null }),
+      delete: async () => ({ error: null }),
+    }),
+  };
+}
+
 function getClient() {
   if (!cachedClient) {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-    // During build time, return a dummy object to prevent errors
     if (!supabaseUrl || !supabaseAnonKey) {
-      return {};
+      return getDummyClient();
     }
 
     cachedClient = createClient(supabaseUrl, supabaseAnonKey);
@@ -17,7 +33,6 @@ function getClient() {
   return cachedClient;
 }
 
-// Create a proxy that defers client creation to runtime
 export const supabase = new Proxy({}, {
   get: (target, prop) => {
     const client = getClient();
