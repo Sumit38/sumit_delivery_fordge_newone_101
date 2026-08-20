@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import ScenariosExtraction from "./ScenariosExtraction";
+import ComplexityFlowDiagram from "./ComplexityFlowDiagram";
 
 interface Analysis {
   id: string;
@@ -335,6 +336,15 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
                   >
                     📋 Extract Scenarios & Download Excel
                   </button>
+
+                  {/* Complexity Flow Diagram */}
+                  <ComplexityFlowDiagram
+                    nodesCount={selectedAnalysis.nodesCount}
+                    edgesCount={selectedAnalysis.edgesCount}
+                    paths={selectedAnalysis.paths || 1}
+                    complexityScore={selectedAnalysis.complexityScore}
+                    title={selectedAnalysis.title}
+                  />
 
                   <div className="space-y-4">
                     <div>
