@@ -231,6 +231,9 @@ export async function POST(request: NextRequest) {
             decisionPoints: sanitizedAnalysis.decisionPoints,
             alternativePaths: sanitizedAnalysis.alternativePaths,
             analysis: sanitizedAnalysis.analysis,
+            reasoning: sanitizedAnalysis.reasoning,
+            confidenceScore: sanitizedAnalysis.confidenceScore,
+            confidenceReason: sanitizedAnalysis.confidenceReason,
           },
         })
         .select()
@@ -278,6 +281,9 @@ export async function POST(request: NextRequest) {
         pathsList: sanitizedAnalysis.paths,
         decisionPoints: sanitizedAnalysis.decisionPoints,
         analysis: sanitizedAnalysis.analysis,
+        reasoning: sanitizedAnalysis.reasoning,
+        confidenceScore: sanitizedAnalysis.confidenceScore,
+        confidenceReason: sanitizedAnalysis.confidenceReason,
       },
     };
 

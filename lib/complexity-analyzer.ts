@@ -16,6 +16,9 @@ export interface ComplexityAnalysis {
   analysis: string;
   decisionPoints: string[];
   alternativePaths: number;
+  reasoning?: string; // Detailed step-by-step reasoning from Claude
+  confidenceScore?: number; // 0-100 confidence in the analysis
+  confidenceReason?: string; // Why we're confident or not
 }
 
 export async function analyzeRequirementComplexity(
@@ -26,41 +29,63 @@ export async function analyzeRequirementComplexity(
 
     const response = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 8000,
+      max_tokens: 12000,
       temperature: 0,
       messages: [
         {
           role: "user",
-          content: `Use McCabe's formula M = E - N + 2P to analyze this requirement:
+          content: `Use McCabe's formula M = E - N + 2P to analyze this requirement. Be thorough and explicit.
 
+REQUIREMENT:
 ${requirementText}
 
-First, identify all nodes and edges, then calculate:
-- N = Nodes (states, decisions, Start, End)
-- E = Edges (all transitions, success/failure/retry paths)
-- P = Distinct paths (all unique routes from Start to End)
-- M = E - N + 2P
+STEP-BY-STEP INSTRUCTIONS:
+
+1. IDENTIFY ALL NODES (states/decision points):
+   - List Start node
+   - List each state, decision point, process step, or condition check
+   - List End node
+   - For each node, briefly explain why it's a node
+
+2. IDENTIFY ALL EDGES (transitions/flows):
+   - For each transition between nodes, describe the condition/trigger
+   - Include success paths, failure paths, error handling, retries, loops
+   - For each edge, explain what triggers this transition
+
+3. TRACE ALL DISTINCT PATHS:
+   - List every unique route from Start to End
+   - Consider: happy path, error cases, edge cases, retry logic, alternative flows
+   - For each path, list the nodes in order
+
+4. REASONING & VALIDATION:
+   - Are there any loops or cycles? If yes, explain how they affect paths
+   - Are there parallel flows or conditional branches?
+   - Did you consider error handling and edge cases?
 
 Output in this format:
+
+REASONING:
+[Detailed explanation of how you identified nodes, edges, and paths. Include any assumptions or complexities found.]
+
 NODES:
 - Start
-- [list each node/state]
+- [list each node with brief description]
 - End
 
 EDGES:
-- Start -> [node1] (condition if any)
-- [list each edge with from -> to]
+- Start -> [node] (condition/trigger)
+- [list all edges with conditions]
 
 PATHS:
-- [list path 1]
-- [list path 2]
-- [list each distinct path]
+- Path 1: [Start -> ... -> End]
+- Path 2: [Start -> ... -> End]
+- [list all distinct paths]
 
 CALCULATION:
-N = [number]
-E = [number]
-P = [number]
-M = [number]`,
+N = [number] (nodes count including Start and End)
+E = [number] (edges count)
+P = [number] (distinct paths count)
+M = E - N + 2P = [number]`,
         },
       ],
     });
@@ -163,6 +188,16 @@ M = [number]`,
 
     const testScenarios = 2 * p;
 
+    // Extract reasoning from REASONING section
+    let reasoning = "";
+    const reasoningMatch = fullText.match(/REASONING:\s*([\s\S]*?)(?=NODES:|$)/i);
+    if (reasoningMatch) {
+      reasoning = reasoningMatch[1].trim();
+    }
+
+    // Calculate confidence score based on multiple validation factors
+    const confidenceData = calculateConfidenceScore(n, e, p, nodesList, edgesList, pathsList, reasoning);
+
     console.log("\n🧮 FORMULA CALCULATION (McCabe Cyclomatic Complexity):");
     console.log(`   N (Nodes) = ${n}`);
     console.log(`   E (Edges) = ${e}`);
@@ -171,7 +206,8 @@ M = [number]`,
     console.log(`   M = ${e} - ${n} + 2(${p})`);
     console.log(`   M = ${m}`);
     console.log(`\n✅ COMPLEXITY SCORE (M): ${m}`);
-    console.log(`✅ TEST SCENARIOS REQUIRED (2P): ${testScenarios}\n`);
+    console.log(`✅ TEST SCENARIOS REQUIRED (2P): ${testScenarios}`);
+    console.log(`\n📊 CONFIDENCE SCORE: ${confidenceData.score}% - ${confidenceData.reason}\n`);
 
     return {
       nodes: nodesList,
@@ -187,6 +223,9 @@ M = [number]`,
         (node) => node.toLowerCase().includes("decision") || node.toLowerCase().includes("check")
       ),
       alternativePaths: p,
+      reasoning: reasoning,
+      confidenceScore: confidenceData.score,
+      confidenceReason: confidenceData.reason,
     };
   } catch (error) {
     console.error("❌ Error in complexity analysis:", error);
@@ -209,6 +248,93 @@ function createFallbackAnalysis(): ComplexityAnalysis {
     decisionPoints: [],
     alternativePaths: 5,
   };
+}
+
+function calculateConfidenceScore(
+  n: number,
+  e: number,
+  p: number,
+  nodes: string[],
+  edges: Array<{ from: string; to: string; condition?: string }>,
+  paths: string[][],
+  reasoning: string
+): { score: number; reason: string } {
+  let score = 85; // Start with baseline high confidence
+  let reasons: string[] = [];
+
+  // Check 1: Graph structure validity (E >= N for connected graphs)
+  if (e < n - 1) {
+    score -= 15;
+    reasons.push("Graph may be disconnected");
+  } else if (e >= n) {
+    reasons.push("Well-formed graph structure");
+  }
+
+  // Check 2: Path count sanity check
+  const maxPossiblePaths = Math.pow(2, Math.min(n - 2, 10)); // Cap at 2^10 for calculation
+  if (p > maxPossiblePaths) {
+    score -= 10;
+    reasons.push("Path count seems high");
+  }
+
+  // Check 3: Minimal complexity check
+  if (n <= 3 && e <= 2 && p === 1) {
+    score -= 5;
+    reasons.push("Very simple requirement");
+  }
+
+  // Check 4: Complex requirement check
+  if (n > 20 || p > 10) {
+    score -= 10;
+    reasons.push("High complexity - manual review recommended");
+  }
+
+  // Check 5: Data extraction quality
+  if (nodes.length === 0 || edges.length === 0) {
+    score -= 20;
+    reasons.push("Incomplete node or edge extraction");
+  } else if (nodes.length < n || edges.length < e) {
+    score -= 5;
+    reasons.push("Some nodes/edges may be missing");
+  }
+
+  // Check 6: Reasoning quality
+  if (!reasoning || reasoning.length < 50) {
+    score -= 10;
+    reasons.push("Limited reasoning provided");
+  } else if (reasoning.includes("loop") || reasoning.includes("parallel") || reasoning.includes("error")) {
+    reasons.push("Complex flows identified");
+  }
+
+  // Check 7: Path validation
+  if (paths.length === 0) {
+    score -= 15;
+    reasons.push("No paths extracted");
+  } else if (paths.length < p) {
+    score -= 5;
+    reasons.push("Some paths may be missing");
+  }
+
+  // Ensure score stays in valid range
+  score = Math.max(0, Math.min(100, score));
+
+  // Build confidence reason
+  let finalReason = "";
+  if (score >= 80) {
+    finalReason = "High confidence - detailed analysis completed";
+  } else if (score >= 60) {
+    finalReason = "Moderate confidence - some complexity noted";
+  } else if (score >= 40) {
+    finalReason = "Lower confidence - manual review recommended";
+  } else {
+    finalReason = "Low confidence - requires manual verification";
+  }
+
+  if (reasons.length > 0) {
+    finalReason += ` (${reasons.slice(0, 2).join(", ")})`;
+  }
+
+  return { score, reason: finalReason };
 }
 
 export function getComplexityLevel(
