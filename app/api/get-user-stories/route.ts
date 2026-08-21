@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 
+function extractTitleFromText(text: string): string {
+  if (!text) return "Untitled Requirement";
+  // Get first 60 characters or up to first period/newline
+  const firstLine = text.split(/[\n\r\.]/)[0].trim().substring(0, 60);
+  return firstLine || "Untitled Requirement";
+}
+
 export async function GET(request: NextRequest) {
   try {
     const authHeader = request.headers.get("authorization");
@@ -63,7 +70,7 @@ export async function GET(request: NextRequest) {
     }
 
     // For stories with requirement_id, fetch requirement details
-    // For stories without requirement_id, fetch from complexity_results
+    // For stories without requirement_id, fetch from complexity_results with full requirement text
     let transformedData: any[] = [];
 
     if (data && data.length > 0) {
@@ -77,12 +84,16 @@ export async function GET(request: NextRequest) {
         const reqIds = [...new Set(storiesWithReqId.map((s: any) => s.requirement_id))];
         const { data: requirements } = await supabaseServer
           .from("requirements")
-          .select("id, title")
+          .select("id, title, document_text")
           .in("id", reqIds);
 
         if (requirements) {
           requirements.forEach((req: any) => {
-            requirementMap[req.id] = req.title;
+            // Use title if available, otherwise extract from document_text
+            const displayTitle = req.title && req.title !== "Untitled Requirement"
+              ? req.title
+              : extractTitleFromText(req.document_text);
+            requirementMap[req.id] = displayTitle;
           });
         }
       }
@@ -93,14 +104,24 @@ export async function GET(request: NextRequest) {
         const analysisIds = [...new Set(historicalStories.map((s: any) => s.analysis_id))];
         const { data: complexityResults } = await supabaseServer
           .from("complexity_results")
-          .select("id, requirement_id, requirements(id, title)")
+          .select("id, requirement_id, requirements(id, title, document_text)")
           .in("id", analysisIds);
 
         if (complexityResults) {
           complexityResults.forEach((cr: any) => {
+            const requirement = cr.requirements?.[0];
+            let displayTitle = "Untitled Requirement";
+
+            if (requirement) {
+              // Use title if available and not "Untitled Requirement", otherwise extract from text
+              displayTitle = requirement.title && requirement.title !== "Untitled Requirement"
+                ? requirement.title
+                : extractTitleFromText(requirement.document_text);
+            }
+
             complexityMap[cr.id] = {
               requirement_id: cr.requirement_id,
-              title: cr.requirements?.[0]?.title || "Untitled Requirement"
+              title: displayTitle
             };
           });
         }
