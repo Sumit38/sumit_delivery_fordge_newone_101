@@ -42,11 +42,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Insert into user_stories table
+    // Fetch the analysis to get requirement_id
+    const { data: analysisData, error: analysisError } = await supabaseServer
+      .from("complexity_results")
+      .select("requirement_id")
+      .eq("id", analysisId)
+      .single();
+
+    if (analysisError || !analysisData) {
+      return NextResponse.json(
+        { error: "Analysis not found" },
+        { status: 404 }
+      );
+    }
+
+    // Insert into user_stories table with requirement_id
     const { data, error } = await supabaseServer
       .from("user_stories")
       .insert({
         analysis_id: analysisId,
+        requirement_id: analysisData.requirement_id,
         user_id: userId,
         stories: stories,
         summary: summary || "",

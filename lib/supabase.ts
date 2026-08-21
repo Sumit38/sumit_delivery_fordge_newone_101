@@ -123,6 +123,28 @@ export type Database = {
           analysis_data?: Record<string, any>;
         };
       };
+      user_stories: {
+        Row: {
+          id: string;
+          analysis_id: string;
+          requirement_id: string;
+          user_id: string;
+          stories: any[];
+          summary: string;
+          created_at: string;
+        };
+        Insert: {
+          analysis_id: string;
+          requirement_id: string;
+          user_id: string;
+          stories: any[];
+          summary: string;
+        };
+        Update: {
+          stories?: any[];
+          summary?: string;
+        };
+      };
     };
   };
 };
