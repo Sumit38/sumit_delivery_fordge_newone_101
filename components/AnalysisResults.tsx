@@ -9,7 +9,8 @@ interface Result {
   nodesCount: number;
   edgesCount: number;
   connectedComponents?: number;
-  paths?: number;
+  paths?: any; // Can be array or number depending on API response
+  alternativePaths?: number;
   calculation?: string;
   analysis: string;
 }
