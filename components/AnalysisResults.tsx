@@ -111,7 +111,7 @@ export default function AnalysisResults() {
         complexity={{
           n: result.nodesCount,
           e: result.edgesCount,
-          p: result.paths || result.connectedComponents || 1,
+          p: result.alternativePaths || result.connectedComponents || 1,
           complexityScore: result.complexityScore,
         }}
         onClose={() => setShowScenarios(false)}
