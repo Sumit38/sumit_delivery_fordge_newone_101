@@ -159,13 +159,21 @@ export async function POST(request: NextRequest) {
     }
 
     // Sanitize analysis data
+    const n = Math.max(parseInt(String(analysis.nodesCount)) || 5, 1);
+    const e = Math.max(parseInt(String(analysis.edgesCount)) || 4, 1);
+    const p = Math.max(
+      parseInt(String(analysis.alternativePaths)) || 1,
+      1
+    );
+
+    // CRITICAL FIX: Always calculate M using McCabe's formula M = E - N + 2P
+    // Do NOT trust Claude's complexity score - it may be incorrect
+    const calculatedComplexityScore = e - n + 2 * p;
+
     const sanitizedAnalysis = {
-      nodesCount: Math.max(parseInt(String(analysis.nodesCount)) || 5, 1),
-      edgesCount: Math.max(parseInt(String(analysis.edgesCount)) || 4, 1),
-      complexityScore: Math.max(
-        parseInt(String(analysis.complexityScore)) || 1,
-        1
-      ),
+      nodesCount: n,
+      edgesCount: e,
+      complexityScore: calculatedComplexityScore,
       testScenarios: Math.max(
         parseInt(String(analysis.testScenarios)) || 5,
         1
@@ -176,10 +184,7 @@ export async function POST(request: NextRequest) {
       decisionPoints: Array.isArray(analysis.decisionPoints)
         ? analysis.decisionPoints
         : [],
-      alternativePaths: Math.max(
-        parseInt(String(analysis.alternativePaths)) || 1,
-        1
-      ),
+      alternativePaths: p,
       analysis: String(analysis.analysis || "Analysis complete"),
     };
 
