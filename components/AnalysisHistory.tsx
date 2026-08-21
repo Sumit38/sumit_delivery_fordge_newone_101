@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import ScenariosExtraction from "./ScenariosExtraction";
+import { exportUserStoriesToExcel } from "@/lib/export-user-stories";
 
 interface Analysis {
   id: string;
@@ -309,15 +310,29 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
                   </span>
                 </div>
               </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDelete(analysis.id);
-                }}
-                className="mt-3 w-full px-3 py-2 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors border border-red-200 font-medium"
-              >
-                🗑️ Delete
-              </button>
+              <div className="mt-3 flex gap-2">
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    const { data: { session } } = await supabase.auth.getSession();
+                    if (session) {
+                      await exportUserStoriesToExcel(analysis.id, analysis.title, session.access_token);
+                    }
+                  }}
+                  className="flex-1 px-3 py-2 text-sm bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors border border-blue-200 font-medium"
+                >
+                  📥 Export Stories
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDelete(analysis.id);
+                  }}
+                  className="flex-1 px-3 py-2 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors border border-red-200 font-medium"
+                >
+                  🗑️ Delete
+                </button>
+              </div>
             </div>
           ))}
         </div>
