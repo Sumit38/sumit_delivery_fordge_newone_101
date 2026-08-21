@@ -61,15 +61,15 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Transform data to include requirement title
+    // Transform data to include requirement title (maintain backward compatibility)
     const transformedData = data?.map((story: any) => ({
       id: story.id,
-      analysisId: story.analysis_id,
-      requirementTitle: story.requirements?.[0]?.title || "Untitled Requirement",
-      requirementId: story.requirements?.[0]?.id || story.analysis_id,
+      analysis_id: story.analysis_id,
+      requirement_title: story.requirements?.[0]?.title || "Untitled Requirement",
+      requirement_id: story.requirements?.[0]?.id || story.analysis_id,
       stories: story.stories,
       summary: story.summary,
-      createdAt: story.created_at,
+      created_at: story.created_at,
     })) || [];
 
     return NextResponse.json({
