@@ -22,6 +22,7 @@ interface Analysis {
 interface AnalysisHistoryProps {
   onAnalysisSelect?: (analysis: {
     id: string;
+    title: string;
     requirementText: string;
     complexityScore: number;
     complexityLevel: string;
@@ -265,6 +266,7 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
                             : "Very High";
                     onAnalysisSelect({
                       id: analysis.id,
+                      title: analysis.title,
                       requirementText: analysis.requirementText || "",
                       complexityScore: analysis.complexityScore,
                       complexityLevel,

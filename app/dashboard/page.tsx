@@ -16,6 +16,7 @@ import RequirementSelector from "@/components/RequirementSelector";
 
 interface LatestAnalysis {
   id?: string;
+  title?: string; // Requirement title for use case download
   requirementText: string;
   complexityScore: number;
   complexityLevel: string;
@@ -196,7 +197,7 @@ export default function DashboardPage() {
             {/* Download Use Case Button - Show in all tabs except "analyze" and "about" */}
             {latestAnalysis && activeTab !== "analyze" && activeTab !== "about" && (
               <DownloadUseCaseButton
-                requirementTitle={latestAnalysis.id || "Untitled"}
+                requirementTitle={latestAnalysis.title || latestAnalysis.id || "Untitled"}
                 requirementText={latestAnalysis.requirementText}
                 complexityScore={latestAnalysis.complexityScore}
                 complexityLevel={latestAnalysis.complexityLevel}
@@ -442,6 +443,7 @@ export default function DashboardPage() {
 
                       setLatestAnalysis({
                         id: selected.id,
+                        title: selected.title,
                         requirementText: selected.requirementText || "",
                         complexityScore: selected.complexityScore,
                         complexityLevel,
