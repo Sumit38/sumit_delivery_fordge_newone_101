@@ -9,7 +9,6 @@ import RefineRequirement from "@/components/RefineRequirement";
 import AnalysisHistory from "@/components/AnalysisHistory";
 import EstimationHistory from "@/components/EstimationHistory";
 import SuggestiveUserStories from "@/components/SuggestiveUserStories";
-import UserStoriesHistory from "@/components/UserStoriesHistory";
 import ProposedProjectTimeline from "@/components/ProposedProjectTimeline";
 import AboutPage from "@/components/AboutPage";
 import DownloadUseCaseButton from "@/components/DownloadUseCaseButton";
@@ -31,7 +30,7 @@ interface LatestAnalysis {
 export default function DashboardPage() {
   const router = useRouter();
   const [userEmail, setUserEmail] = useState("");
-  const [activeTab, setActiveTab] = useState<"analyze" | "refine" | "history" | "user-stories" | "user-stories-history" | "proposed-estimation" | "estimation" | "timeline" | "about">("analyze");
+  const [activeTab, setActiveTab] = useState<"analyze" | "refine" | "history" | "user-stories" | "proposed-estimation" | "estimation" | "timeline" | "about">("analyze");
   const [refreshHistory, setRefreshHistory] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -374,22 +373,6 @@ export default function DashboardPage() {
             >
               Estimation History
             </button>
-            <button
-              onClick={() => {
-                setIsTransitioning(true);
-                setTimeout(() => {
-                  setActiveTab("user-stories-history");
-                  setIsTransitioning(false);
-                }, 300);
-              }}
-              className={`px-4 py-2 font-medium transition-colors whitespace-nowrap text-sm ${
-                activeTab === "user-stories-history"
-                  ? "text-blue-600 border-b-2 border-blue-600"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              User Stories History
-            </button>
             {timelineEnabled && (
               <button
                 onClick={() => {
@@ -593,8 +576,6 @@ export default function DashboardPage() {
           </div>
         ) : activeTab === "estimation" ? (
           <EstimationHistory key={String(refreshHistory)} />
-        ) : activeTab === "user-stories-history" ? (
-          <UserStoriesHistory selectedRequirementId={latestAnalysis?.id} />
         ) : activeTab === "timeline" ? (
           <div>
             {latestAnalysis ? (
