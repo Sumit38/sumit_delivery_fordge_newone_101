@@ -31,10 +31,19 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get all user stories for this user
+    // Get all user stories for this user with requirement details
     const { data, error } = await supabaseServer
       .from("user_stories")
-      .select("*")
+      .select(
+        `
+        id,
+        analysis_id,
+        stories,
+        summary,
+        created_at,
+        requirements(id, title, document_text)
+      `
+      )
       .eq("user_id", userId)
       .order("created_at", { ascending: false });
 
@@ -52,9 +61,20 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Transform data to include requirement title
+    const transformedData = data?.map((story: any) => ({
+      id: story.id,
+      analysisId: story.analysis_id,
+      requirementTitle: story.requirements?.[0]?.title || "Untitled Requirement",
+      requirementId: story.requirements?.[0]?.id || story.analysis_id,
+      stories: story.stories,
+      summary: story.summary,
+      createdAt: story.created_at,
+    })) || [];
+
     return NextResponse.json({
       success: true,
-      data: data || [],
+      data: transformedData,
     });
   } catch (error) {
     console.error("Error fetching user stories:", error);
