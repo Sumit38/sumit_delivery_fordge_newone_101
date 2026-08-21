@@ -186,6 +186,9 @@ export async function POST(request: NextRequest) {
         : [],
       alternativePaths: p,
       analysis: String(analysis.analysis || "Analysis complete"),
+      reasoning: analysis.reasoning || "",
+      confidenceScore: analysis.confidenceScore || 75,
+      confidenceReason: analysis.confidenceReason || "Analysis complete",
     };
 
     console.log("🔍 [5/5] Saving to database...");
