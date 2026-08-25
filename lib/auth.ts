@@ -84,3 +84,55 @@ export async function getCurrentSession() {
     return null;
   }
 }
+
+export async function signInWithGoogle() {
+  try {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${typeof window !== 'undefined' ? window.location.origin : process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/callback`,
+      },
+    });
+
+    if (error) throw error;
+    return { success: true, data };
+  } catch (error) {
+    console.error('Google sign-in error:', error);
+    throw error;
+  }
+}
+
+export async function handleAuthCallback() {
+  try {
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error) throw error;
+
+    if (session?.user) {
+      const { data: existingUser } = await supabase
+        .from('users')
+        .select('id')
+        .eq('id', session.user.id)
+        .single();
+
+      if (!existingUser) {
+        const { error: profileError } = await supabase
+          .from('users')
+          .insert({
+            id: session.user.id,
+            clerk_id: session.user.id,
+            email: session.user.email || '',
+            mobile: '',
+            organization: '',
+            role: 'Tester',
+          });
+
+        if (profileError) throw profileError;
+      }
+    }
+
+    return { success: true, session };
+  } catch (error) {
+    console.error('Auth callback error:', error);
+    throw error;
+  }
+}
