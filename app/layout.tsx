@@ -29,45 +29,42 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
-        <style>{`
-          /* Hide Google OAuth button immediately on page load */
-          button:has-text("Sign up with Google"),
-          button:has-text("Sign in with Google"),
-          a:has-text("Sign up with Google"),
-          a:has-text("Sign in with Google"),
-          [data-testid*="google"],
-          [aria-label*="google" i],
-          [class*="google" i]:where(button, a),
-          button:where([class*="google" i]),
-          a:where([class*="google" i]) {
-            display: none !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-        `}</style>
         <script
           dangerouslySetInnerHTML={{
             __html: `
-              // Hide Google OAuth button immediately (before render)
-              const hideGoogleButton = () => {
-                const buttons = document.querySelectorAll('button, a, [role="button"]');
-                buttons.forEach(btn => {
-                  const text = btn.textContent || btn.innerText || '';
-                  if (text.toLowerCase().includes('google')) {
-                    btn.style.display = 'none !important';
-                    btn.style.visibility = 'hidden !important';
-                    btn.style.pointerEvents = 'none !important';
+              // Aggressive Google button hiding - runs FIRST before page renders
+              window.__hideGoogleButton = function() {
+                // Hide all buttons/links containing 'google'
+                const allElements = document.querySelectorAll('*');
+                allElements.forEach(el => {
+                  const text = (el.textContent || el.innerText || '').toLowerCase();
+                  if (text.includes('sign up with google') || text.includes('sign in with google') || text.includes('google')) {
+                    if (el.tagName === 'BUTTON' || el.tagName === 'A' || el.getAttribute('role') === 'button') {
+                      el.style.setProperty('display', 'none', 'important');
+                      el.style.setProperty('visibility', 'hidden', 'important');
+                      el.style.setProperty('height', '0', 'important');
+                      el.style.setProperty('width', '0', 'important');
+                      el.setAttribute('disabled', 'disabled');
+                      el.style.pointerEvents = 'none';
+                    }
                   }
                 });
               };
-              // Run immediately and after DOM changes
-              if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', hideGoogleButton);
-              } else {
-                hideGoogleButton();
-              }
-              const observer = new MutationObserver(hideGoogleButton);
-              observer.observe(document.body, { childList: true, subtree: true });
+              // Run on every event
+              window.__hideGoogleButton();
+              document.addEventListener('DOMContentLoaded', window.__hideGoogleButton);
+              window.addEventListener('load', window.__hideGoogleButton);
+              document.addEventListener('change', window.__hideGoogleButton);
+              // Monitor for any new elements
+              const observer = new MutationObserver(() => {
+                setTimeout(window.__hideGoogleButton, 0);
+              });
+              observer.observe(document.body || document.documentElement, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['style', 'class']
+              });
             `,
           }}
         />
