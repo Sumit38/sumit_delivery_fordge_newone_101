@@ -28,6 +28,28 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              // Hide Google OAuth button if it appears
+              const hideGoogleButton = () => {
+                const buttons = document.querySelectorAll('button, a');
+                buttons.forEach(btn => {
+                  if (btn.textContent.includes('Google') || btn.textContent.includes('google')) {
+                    btn.style.display = 'none';
+                  }
+                });
+              };
+              // Run on load and after mutations
+              window.addEventListener('load', hideGoogleButton);
+              document.addEventListener('DOMContentLoaded', hideGoogleButton);
+              const observer = new MutationObserver(hideGoogleButton);
+              observer.observe(document.body, { childList: true, subtree: true });
+            `,
+          }}
+        />
+      </head>
       <body className="min-h-full flex flex-col bg-slate-50 text-slate-900">
         {children}
       </body>
