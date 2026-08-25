@@ -143,7 +143,7 @@ export default function SignupPage() {
           </div>
           <h1 className="text-3xl font-bold text-slate-900">Join DeliveryForge</h1>
           <p className="text-slate-600 mt-2">
-            Transform requirements into complete delivery plans today
+            Automation of End to End Project Management
           </p>
         </div>
 
