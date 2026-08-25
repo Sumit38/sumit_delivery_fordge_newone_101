@@ -32,20 +32,26 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html: `
-              // Aggressive Google button hiding - runs FIRST before page renders
+              // Hide Google OAuth elements and divider
               window.__hideGoogleButton = function() {
-                // Hide all buttons/links containing 'google'
-                const allElements = document.querySelectorAll('*');
+                // Hide Google buttons specifically
+                const allElements = document.querySelectorAll('button, a, [role="button"]');
                 allElements.forEach(el => {
                   const text = (el.textContent || el.innerText || '').toLowerCase();
-                  if (text.includes('sign up with google') || text.includes('sign in with google') || text.includes('google')) {
-                    if (el.tagName === 'BUTTON' || el.tagName === 'A' || el.getAttribute('role') === 'button') {
-                      el.style.setProperty('display', 'none', 'important');
-                      el.style.setProperty('visibility', 'hidden', 'important');
-                      el.style.setProperty('height', '0', 'important');
-                      el.style.setProperty('width', '0', 'important');
-                      el.setAttribute('disabled', 'disabled');
-                      el.style.pointerEvents = 'none';
+                  if (text.includes('sign up with google') || text.includes('sign in with google')) {
+                    el.style.setProperty('display', 'none', 'important');
+                  }
+                });
+
+                // Hide "OR CONTINUE WITH EMAIL" divider by finding it specifically
+                const allDivs = document.querySelectorAll('div, span, p');
+                allDivs.forEach(el => {
+                  const text = (el.textContent || el.innerText || '').trim().toLowerCase();
+                  if (text === 'or continue with email' || text === 'or') {
+                    // Hide the divider and possibly its parent container
+                    el.style.setProperty('display', 'none', 'important');
+                    if (el.parentElement) {
+                      el.parentElement.style.setProperty('display', 'none', 'important');
                     }
                   }
                 });
