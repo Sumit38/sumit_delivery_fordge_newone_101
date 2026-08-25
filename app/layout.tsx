@@ -34,10 +34,12 @@ export default function RootLayout({
             __html: `
               // Aggressive Google button hiding - runs FIRST before page renders
               window.__hideGoogleButton = function() {
-                // Hide all buttons/links containing 'google'
+                // Hide all buttons/links containing 'google' and related dividers
                 const allElements = document.querySelectorAll('*');
                 allElements.forEach(el => {
-                  const text = (el.textContent || el.innerText || '').toLowerCase();
+                  const text = (el.textContent || el.innerText || '').toLowerCase().trim();
+
+                  // Hide Google buttons
                   if (text.includes('sign up with google') || text.includes('sign in with google') || text.includes('google')) {
                     if (el.tagName === 'BUTTON' || el.tagName === 'A' || el.getAttribute('role') === 'button') {
                       el.style.setProperty('display', 'none', 'important');
@@ -47,6 +49,14 @@ export default function RootLayout({
                       el.setAttribute('disabled', 'disabled');
                       el.style.pointerEvents = 'none';
                     }
+                  }
+
+                  // Hide "OR CONTINUE WITH EMAIL" divider
+                  if (text === 'or continue with email' || text === 'or' || text.includes('continue with email')) {
+                    el.style.setProperty('display', 'none', 'important');
+                    el.style.setProperty('visibility', 'hidden', 'important');
+                    el.style.setProperty('height', '0', 'important');
+                    el.style.setProperty('margin', '0', 'important');
                   }
                 });
               };
