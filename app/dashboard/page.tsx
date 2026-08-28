@@ -38,6 +38,7 @@ export default function DashboardPage() {
   const [latestAnalysis, setLatestAnalysis] = useState<LatestAnalysis | null>(null);
   const [timelineEnabled, setTimelineEnabled] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [incompleteAnalysisWarning, setIncompleteAnalysisWarning] = useState<{show: boolean; message: string; analysisData: any} | null>(null);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -125,6 +126,19 @@ export default function DashboardPage() {
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || "Analysis failed");
+      }
+
+      const data = await response.json();
+
+      // Check if analysis is incomplete
+      if (data.isIncompleteAnalysis) {
+        setIncompleteAnalysisWarning({
+          show: true,
+          message: data.incompletenessReason || "Not enough details provided. Please answer more questions.",
+          analysisData: data
+        });
+        setIsTransitioning(false);
+        return;
       }
 
       // Analysis successful, refresh history and go to it
@@ -467,17 +481,57 @@ export default function DashboardPage() {
 
         {/* Content */}
         {activeTab === "analyze" ? (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-2">
-              <RefineRequirement
-                onRefinementComplete={handleRefinementComplete}
-                onAnalyzeRequirement={handleAnalyzeFromRefinement}
-              />
-            </div>
+          <div className="space-y-6">
+            {/* Incomplete Analysis Warning */}
+            {incompleteAnalysisWarning?.show && (
+              <div className="p-6 bg-yellow-50 border-l-4 border-yellow-400 rounded-lg">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <h3 className="font-bold text-yellow-900 mb-2">⚠️ Incomplete Analysis</h3>
+                    <p className="text-sm text-yellow-800 mb-4">{incompleteAnalysisWarning.message}</p>
+                    <p className="text-xs text-yellow-700 mb-4">
+                      To improve accuracy, please go back and provide more detailed answers to the questions about your requirement.
+                    </p>
+                    <button
+                      onClick={() => {
+                        const analysisData = incompleteAnalysisWarning.analysisData?.analysis;
+                        if (analysisData) {
+                          const dataStr = JSON.stringify(analysisData, null, 2);
+                          const dataBlob = new Blob([dataStr], { type: 'application/json' });
+                          const url = URL.createObjectURL(dataBlob);
+                          const link = document.createElement('a');
+                          link.href = url;
+                          link.download = `analysis-data-${new Date().toISOString().split('T')[0]}.json`;
+                          link.click();
+                          URL.revokeObjectURL(url);
+                        }
+                      }}
+                      className="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 font-medium text-sm transition-colors"
+                    >
+                      📥 Download Analysis Data
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => setIncompleteAnalysisWarning(null)}
+                    className="text-yellow-600 hover:text-yellow-800 font-bold ml-4"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            )}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-2">
+                <RefineRequirement
+                  onRefinementComplete={handleRefinementComplete}
+                  onAnalyzeRequirement={handleAnalyzeFromRefinement}
+                />
+              </div>
             <div>
               <AnalysisResults />
             </div>
           </div>
+            </div>
         ) : activeTab === "history" ? (
           <AnalysisHistory
             key={String(refreshHistory)}
