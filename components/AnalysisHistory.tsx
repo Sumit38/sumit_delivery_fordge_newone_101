@@ -327,25 +327,39 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
                   📥 Export Stories
                 </button>
                 <button
-                  onClick={(e) => {
+                  onClick={async (e) => {
                     e.stopPropagation();
-                    const analysisData = {
-                      title: analysis.title,
-                      complexityScore: analysis.complexityScore,
-                      nodesCount: analysis.nodesCount,
-                      edgesCount: analysis.edgesCount,
-                      paths: analysis.paths,
-                      testScenarios: analysis.testScenarios,
-                      createdAt: analysis.createdAt,
-                    };
-                    const dataStr = JSON.stringify(analysisData, null, 2);
-                    const blob = new Blob([dataStr], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const link = document.createElement('a');
-                    link.href = url;
-                    link.download = `${analysis.title}-analysis-${new Date().toISOString().split('T')[0]}.json`;
-                    link.click();
-                    URL.revokeObjectURL(url);
+                    try {
+                      const { data: { session } } = await supabase.auth.getSession();
+                      if (!session) {
+                        alert("Not authenticated");
+                        return;
+                      }
+
+                      const response = await fetch(`/api/get-analysis-details?requirementId=${analysis.id}`, {
+                        headers: {
+                          "Authorization": `Bearer ${session.access_token}`,
+                        },
+                      });
+
+                      if (!response.ok) {
+                        throw new Error("Failed to fetch analysis details");
+                      }
+
+                      const { data: analysisDetails } = await response.json();
+
+                      const dataStr = JSON.stringify(analysisDetails, null, 2);
+                      const blob = new Blob([dataStr], { type: 'application/json' });
+                      const url = URL.createObjectURL(blob);
+                      const link = document.createElement('a');
+                      link.href = url;
+                      link.download = `${analysis.title}-analysis-complete-${new Date().toISOString().split('T')[0]}.json`;
+                      link.click();
+                      URL.revokeObjectURL(url);
+                    } catch (error) {
+                      console.error("Download error:", error);
+                      alert("Failed to download analysis details");
+                    }
                   }}
                   className="flex-1 px-3 py-2 text-sm bg-purple-50 text-purple-600 rounded hover:bg-purple-100 transition-colors border border-purple-200 font-medium"
                 >

@@ -54,6 +54,7 @@ export async function GET(request: NextRequest) {
         document_text,
         created_at,
         complexity_results (
+          id,
           nodes_count,
           edges_count,
           complexity_score,
