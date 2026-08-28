@@ -179,6 +179,10 @@ export default function DashboardPage() {
 
       if (response.ok) {
         setTimelineEnabled(newValue);
+        // Reload page to reflect timeline visibility change
+        setTimeout(() => {
+          window.location.reload();
+        }, 300);
       }
     } catch (err) {
       alert("Failed to update preference: " + (err instanceof Error ? err.message : "Unknown error"));
