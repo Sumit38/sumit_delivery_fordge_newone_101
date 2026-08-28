@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 
 interface EstimationData {
   id: string;
+  requirementId: string;
   title: string;
   complexityScore: number;
   paths: number;
@@ -136,7 +137,7 @@ export default function EstimationHistory() {
     );
   }
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (estimation: EstimationData) => {
     if (!confirm("Are you sure you want to delete this estimation? This action cannot be undone.")) {
       return;
     }
@@ -145,7 +146,7 @@ export default function EstimationHistory() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      const response = await fetch(`/api/analyses/${id}`, {
+      const response = await fetch(`/api/analyses/${estimation.requirementId}`, {
         method: "DELETE",
         headers: {
           "Authorization": `Bearer ${session.access_token}`,
@@ -354,7 +355,7 @@ export default function EstimationHistory() {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleDelete(est.id);
+                      handleDelete(est);
                     }}
                     className="w-full px-4 py-2 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors border border-red-200 font-medium"
                   >
