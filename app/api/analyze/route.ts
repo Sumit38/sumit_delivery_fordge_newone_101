@@ -231,6 +231,9 @@ export async function POST(request: NextRequest) {
           complexity_score: sanitizedAnalysis.complexityScore,
           test_scenarios: sanitizedAnalysis.testScenarios,
           analysis_data: {
+            nodes: sanitizedAnalysis.nodes,
+            edges: sanitizedAnalysis.edges,
+            paths: sanitizedAnalysis.paths,
             decisionPoints: sanitizedAnalysis.decisionPoints,
             alternativePaths: sanitizedAnalysis.alternativePaths,
             analysis: sanitizedAnalysis.analysis,

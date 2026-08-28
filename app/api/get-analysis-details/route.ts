@@ -85,10 +85,10 @@ export async function GET(request: NextRequest) {
       },
       metrics: {
         calculation: `M = E - N + 2P = ${result.edges_count} - ${result.nodes_count} + 2(${analysisData.alternativePaths || 1}) = ${result.complexity_score}`,
-        nodes: analysisData.nodes || [],
-        edges: analysisData.edges || [],
-        paths: analysisData.pathsList || [],
-        decisionPoints: analysisData.decisionPoints || [],
+        nodes: Array.isArray(analysisData.nodes) ? analysisData.nodes : [],
+        edges: Array.isArray(analysisData.edges) ? analysisData.edges : [],
+        paths: Array.isArray(analysisData.paths) ? analysisData.paths : [],
+        decisionPoints: Array.isArray(analysisData.decisionPoints) ? analysisData.decisionPoints : [],
       },
       reasoning: {
         analysis: analysisData.analysis || "",
