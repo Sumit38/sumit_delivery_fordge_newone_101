@@ -267,10 +267,19 @@ export async function POST(request: NextRequest) {
     // ✅ SUCCESS: Return response
     console.log("✅ ✅ ✅ ALL STEPS COMPLETED SUCCESSFULLY ✅ ✅ ✅");
 
+    // Check if analysis is incomplete/ambiguous (complexity score < 0 or disconnected graph)
+    const isIncompleteAnalysis =
+      sanitizedAnalysis.complexityScore < 0 ||
+      sanitizedAnalysis.edgesCount < sanitizedAnalysis.nodesCount - 1;
+
     const responseData = {
       success: true,
       requirementId: String(requirementData.id),
       resultId: String(resultData.id),
+      isIncompleteAnalysis,
+      incompletenessReason: isIncompleteAnalysis
+        ? "Not enough details provided. Please answer more questions about your requirement to get accurate complexity analysis."
+        : null,
       analysis: {
         nodesCount: sanitizedAnalysis.nodesCount,
         edgesCount: sanitizedAnalysis.edgesCount,
