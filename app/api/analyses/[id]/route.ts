@@ -27,19 +27,31 @@ export async function DELETE(
 
     const { id } = await params;
 
-    // Verify the analysis belongs to the user before deleting
-    const { data: requirement } = await supabaseServer
-      .from("requirements")
-      .select("id")
+    // First try to find by complexity_results ID (new API format)
+    let { data: analysis } = await supabaseServer
+      .from("complexity_results")
+      .select("requirement_id")
       .eq("id", id)
-      .eq("user_id", userId)
       .single();
 
-    if (!requirement) {
-      return NextResponse.json(
-        { error: "Analysis not found or unauthorized" },
-        { status: 404 }
-      );
+    let requirementId = analysis?.requirement_id;
+
+    // If not found, try requirement ID (backward compatibility)
+    if (!requirementId) {
+      const { data: requirement } = await supabaseServer
+        .from("requirements")
+        .select("id")
+        .eq("id", id)
+        .eq("user_id", userId)
+        .single();
+
+      if (!requirement) {
+        return NextResponse.json(
+          { error: "Analysis not found or unauthorized" },
+          { status: 404 }
+        );
+      }
+      requirementId = requirement.id;
     }
 
     // Delete in correct order (children first, then parent)
@@ -47,25 +59,25 @@ export async function DELETE(
     await supabaseServer
       .from("user_stories")
       .delete()
-      .eq("analysis_id", id);
+      .eq("requirement_id", requirementId);
 
     // 2. Delete project timelines linked to this analysis
     await supabaseServer
       .from("project_timelines")
       .delete()
-      .eq("analysis_id", id);
+      .eq("requirement_id", requirementId);
 
     // 3. Delete complexity results
     await supabaseServer
       .from("complexity_results")
       .delete()
-      .eq("requirement_id", id);
+      .eq("requirement_id", requirementId);
 
     // 4. Finally delete the requirement itself
     const { error } = await supabaseServer
       .from("requirements")
       .delete()
-      .eq("id", id);
+      .eq("id", requirementId);
 
     if (error) {
       throw error;
