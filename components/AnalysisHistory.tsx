@@ -329,6 +329,31 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
+                    const analysisData = {
+                      title: analysis.title,
+                      complexityScore: analysis.complexityScore,
+                      nodesCount: analysis.nodesCount,
+                      edgesCount: analysis.edgesCount,
+                      paths: analysis.paths,
+                      testScenarios: analysis.testScenarios,
+                      createdAt: analysis.createdAt,
+                    };
+                    const dataStr = JSON.stringify(analysisData, null, 2);
+                    const blob = new Blob([dataStr], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `${analysis.title}-analysis-${new Date().toISOString().split('T')[0]}.json`;
+                    link.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  className="flex-1 px-3 py-2 text-sm bg-purple-50 text-purple-600 rounded hover:bg-purple-100 transition-colors border border-purple-200 font-medium"
+                >
+                  📊 Download Analysis
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
                     handleDelete(analysis.id);
                   }}
                   className="flex-1 px-3 py-2 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors border border-red-200 font-medium"
