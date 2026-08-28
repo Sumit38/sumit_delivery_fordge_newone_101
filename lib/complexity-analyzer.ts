@@ -185,6 +185,21 @@ M = E - N + 2P = [number]`,
       return createFallbackAnalysis();
     }
 
+    // CRITICAL: Validate graph structure (E >= N-1 for connected graph)
+    // If invalid, it's likely hallucination or incomplete analysis
+    if (e < n - 1) {
+      console.warn(`⚠️ Invalid graph structure: E(${e}) < N-1(${n-1}). Graph is disconnected.`);
+      console.warn(`This indicates incomplete analysis. Using fallback.`);
+      return createFallbackAnalysis();
+    }
+
+    // Validate M calculation: should be M = E - N + 2P
+    const calculatedM = e - n + 2 * p;
+    if (calculatedM < 0) {
+      console.warn(`⚠️ Negative complexity detected: M = ${calculatedM}. Invalid analysis.`);
+      return createFallbackAnalysis();
+    }
+
 
     const testScenarios = 2 * p;
 
