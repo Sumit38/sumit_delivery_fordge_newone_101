@@ -42,32 +42,30 @@ export async function DELETE(
       );
     }
 
-    const requirementId = requirement.id;
-
     // Delete in correct order (children first, then parent)
     // 1. Delete user stories linked to this analysis
     await supabaseServer
       .from("user_stories")
       .delete()
-      .eq("requirement_id", requirementId);
+      .eq("requirement_id", id);
 
     // 2. Delete project timelines linked to this analysis
     await supabaseServer
       .from("project_timelines")
       .delete()
-      .eq("requirement_id", requirementId);
+      .eq("requirement_id", id);
 
     // 3. Delete complexity results
     await supabaseServer
       .from("complexity_results")
       .delete()
-      .eq("requirement_id", requirementId);
+      .eq("requirement_id", id);
 
     // 4. Finally delete the requirement itself
     const { error } = await supabaseServer
       .from("requirements")
       .delete()
-      .eq("id", requirementId);
+      .eq("id", id);
 
     if (error) {
       throw error;

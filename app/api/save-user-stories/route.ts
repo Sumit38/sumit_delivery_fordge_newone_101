@@ -42,11 +42,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Fetch the analysis to get requirement_id
+    // analysisId is the requirement ID - fetch the analysis_result to get the actual complexity_results ID
     const { data: analysisData, error: analysisError } = await supabaseServer
       .from("complexity_results")
-      .select("requirement_id")
-      .eq("id", analysisId)
+      .select("id")
+      .eq("requirement_id", analysisId)
       .single();
 
     if (analysisError || !analysisData) {
@@ -56,12 +56,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Insert into user_stories table with requirement_id
+    const complexityResultsId = analysisData.id;
+
+    // Insert into user_stories table
     const { data, error } = await supabaseServer
       .from("user_stories")
       .insert({
-        analysis_id: analysisId,
-        requirement_id: analysisData.requirement_id,
+        analysis_id: complexityResultsId,
+        requirement_id: analysisId,
         user_id: userId,
         stories: stories,
         summary: summary || "",

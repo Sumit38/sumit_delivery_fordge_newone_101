@@ -79,8 +79,8 @@ export async function GET(request: NextRequest) {
         const result = req.complexity_results[0];
         const analysisData = result.analysis_data || {};
         return {
-          id: result.id,
-          requirementId: req.id,
+          id: req.id,
+          analysisResultId: result.id,
           title: req.title || "Untitled",
           complexityScore: result.complexity_score,
           testScenarios: result.test_scenarios,
