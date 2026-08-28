@@ -27,6 +27,8 @@ export async function DELETE(
 
     const { id } = await params;
 
+    console.log(`🗑️ Delete request for ID: ${id}, User: ${userId}`);
+
     // First try to find by complexity_results ID (new API format)
     const { data: analysis, error: analysisError } = await supabaseServer
       .from("complexity_results")
@@ -34,10 +36,13 @@ export async function DELETE(
       .eq("id", id)
       .single();
 
+    console.log(`📊 Complex Results query - Error: ${analysisError?.message}, Data:`, analysis);
+
     let requirementId = analysis?.requirement_id;
 
     // If not found in complexity_results, try requirement ID (backward compatibility)
-    if (!requirementId || analysisError) {
+    if (!requirementId && analysisError) {
+      console.log(`⬅️ Falling back to requirements table...`);
       const { data: requirement, error: reqError } = await supabaseServer
         .from("requirements")
         .select("id")
@@ -45,7 +50,10 @@ export async function DELETE(
         .eq("user_id", userId)
         .single();
 
+      console.log(`📋 Requirements query - Error: ${reqError?.message}, Data:`, requirement);
+
       if (!requirement || reqError) {
+        console.error(`❌ Not found in either table for ID: ${id}`);
         return NextResponse.json(
           { error: "Analysis not found or unauthorized" },
           { status: 404 }
@@ -53,6 +61,8 @@ export async function DELETE(
       }
       requirementId = requirement.id;
     }
+
+    console.log(`✅ Found requirement ID: ${requirementId}`);
 
     // Delete in correct order (children first, then parent)
     // 1. Delete user stories linked to this analysis
