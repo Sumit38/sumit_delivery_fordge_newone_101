@@ -7,6 +7,7 @@ import { exportUserStoriesToExcel } from "@/lib/export-user-stories";
 
 interface Analysis {
   id: string;
+  analysisResultId?: string;
   title: string;
   complexityScore: number;
   testScenarios: number;
@@ -318,7 +319,7 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
                     e.stopPropagation();
                     const { data: { session } } = await supabase.auth.getSession();
                     if (session) {
-                      await exportUserStoriesToExcel(analysis.id, analysis.title, session.access_token);
+                      await exportUserStoriesToExcel(analysis.analysisResultId || analysis.id, analysis.title, session.access_token);
                     }
                   }}
                   className="flex-1 px-3 py-2 text-sm bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors border border-blue-200 font-medium"
