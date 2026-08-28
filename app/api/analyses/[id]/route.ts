@@ -28,7 +28,7 @@ export async function DELETE(
     const { id } = await params;
 
     // First try to find by complexity_results ID (new API format)
-    let { data: analysis } = await supabaseServer
+    const { data: analysis, error: analysisError } = await supabaseServer
       .from("complexity_results")
       .select("requirement_id")
       .eq("id", id)
@@ -36,16 +36,16 @@ export async function DELETE(
 
     let requirementId = analysis?.requirement_id;
 
-    // If not found, try requirement ID (backward compatibility)
-    if (!requirementId) {
-      const { data: requirement } = await supabaseServer
+    // If not found in complexity_results, try requirement ID (backward compatibility)
+    if (!requirementId || analysisError) {
+      const { data: requirement, error: reqError } = await supabaseServer
         .from("requirements")
         .select("id")
         .eq("id", id)
         .eq("user_id", userId)
         .single();
 
-      if (!requirement) {
+      if (!requirement || reqError) {
         return NextResponse.json(
           { error: "Analysis not found or unauthorized" },
           { status: 404 }
