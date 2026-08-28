@@ -472,6 +472,9 @@ export default function DashboardPage() {
                         paths: selected.paths,
                         testScenarios: selected.testScenarios,
                       });
+                      // Reset UI state for fresh view of new requirement
+                      setActiveTab("analyze");
+                      setIncompleteAnalysisWarning(null);
                     }
                   }
                 } catch (err) {
