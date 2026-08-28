@@ -362,18 +362,18 @@ function distributeScenarios(detailedScenarios: Scenario[], totalScenariosNeeded
   // Combine detailed and template scenarios
   let allScenarios = [...detailedScenarios, ...templateScenarios];
 
-  // Filter out blank/empty scenarios (those without meaningful content)
+  // Filter out ONLY truly blank/empty scenarios (missing required content)
   allScenarios = allScenarios.filter(scenario => {
-    const hasBlankContent =
+    // A scenario is blank only if it has critical missing data
+    const isTrulyBlank =
       !scenario.name ||
-      scenario.name.includes("Scenario ") ||
-      !scenario.description ||
-      scenario.description.length < 10 ||
-      scenario.steps.length < 2 ||
+      scenario.name.trim().length === 0 ||
+      !scenario.steps ||
+      scenario.steps.length < 1 ||
       !scenario.expectedResult ||
-      scenario.expectedResult.length < 10;
+      scenario.expectedResult.trim().length === 0;
 
-    return !hasBlankContent;
+    return !isTrulyBlank;
   });
 
   console.log(`✅ Total scenarios created: ${allScenarios.length} (${detailedScenarios.length} detailed + ${templateScenarios.length} templates, blank scenarios filtered)`);
