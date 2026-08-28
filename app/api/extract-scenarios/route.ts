@@ -360,9 +360,23 @@ function distributeScenarios(detailedScenarios: Scenario[], totalScenariosNeeded
   }
 
   // Combine detailed and template scenarios
-  const allScenarios = [...detailedScenarios, ...templateScenarios];
+  let allScenarios = [...detailedScenarios, ...templateScenarios];
 
-  console.log(`✅ Total scenarios created: ${allScenarios.length} (${detailedScenarios.length} detailed + ${templateScenarios.length} templates)`);
+  // Filter out blank/empty scenarios (those without meaningful content)
+  allScenarios = allScenarios.filter(scenario => {
+    const hasBlankContent =
+      !scenario.name ||
+      scenario.name.includes("Scenario ") ||
+      !scenario.description ||
+      scenario.description.length < 10 ||
+      scenario.steps.length < 2 ||
+      !scenario.expectedResult ||
+      scenario.expectedResult.length < 10;
+
+    return !hasBlankContent;
+  });
+
+  console.log(`✅ Total scenarios created: ${allScenarios.length} (${detailedScenarios.length} detailed + ${templateScenarios.length} templates, blank scenarios filtered)`);
 
   return allScenarios;
 }
