@@ -78,8 +78,8 @@ export default function ProposedProjectTimeline({
       phases,
       totalDays,
       weeksTotal: Math.ceil(totalDays / 5),
-      devTeamDays: Math.ceil(devManDays / 2),
-      qaTeamDays: Math.ceil(qaManDays / 1),
+      devTeamDays: Math.ceil(devManDays),
+      qaTeamDays: Math.ceil(qaManDays),
     };
   }, [qaManDays, devManDays]);
 
@@ -155,13 +155,13 @@ export default function ProposedProjectTimeline({
           <p className="text-xs text-slate-600 mt-1">Weeks (@ 5 days/week)</p>
         </div>
         <div className="p-4 bg-slate-50 rounded-lg">
-          <p className="text-2xl font-bold text-slate-900">{timeline.devTeamDays}</p>
-          <p className="text-xs text-slate-600 mt-1">Dev Team Days</p>
+          <p className="text-2xl font-bold text-slate-900">~{timeline.devTeamDays}</p>
+          <p className="text-xs text-slate-600 mt-1">Dev Man Days</p>
           <p className="text-xs text-slate-500 mt-1">(2 developers)</p>
         </div>
         <div className="p-4 bg-slate-50 rounded-lg">
-          <p className="text-2xl font-bold text-slate-900">{timeline.qaTeamDays}</p>
-          <p className="text-xs text-slate-600 mt-1">QA Team Days</p>
+          <p className="text-2xl font-bold text-slate-900">~{timeline.qaTeamDays}</p>
+          <p className="text-xs text-slate-600 mt-1">QA Man Days</p>
           <p className="text-xs text-slate-500 mt-1">(1 QA engineer)</p>
         </div>
       </div>
