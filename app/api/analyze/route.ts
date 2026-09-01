@@ -170,6 +170,15 @@ export async function POST(request: NextRequest) {
     // Do NOT trust Claude's complexity score - it may be incorrect
     const calculatedComplexityScore = e - n + 2 * p;
 
+    // CRITICAL: Fix reasoning & analysis text to show CORRECT complexity score, not Claude's potentially incorrect value
+    let correctedReasoning = analysis.reasoning || "";
+    let correctedAnalysis = String(analysis.analysis || "Analysis complete");
+
+    // Replace any incorrect M value in both reasoning and analysis with the correct calculated one
+    const incorrectMRegex = /M\s*=\s*\d+(?!\d)/g;
+    correctedReasoning = correctedReasoning.replace(incorrectMRegex, `M = ${calculatedComplexityScore}`);
+    correctedAnalysis = correctedAnalysis.replace(incorrectMRegex, `M = ${calculatedComplexityScore}`);
+
     const sanitizedAnalysis = {
       nodesCount: n,
       edgesCount: e,
@@ -185,8 +194,8 @@ export async function POST(request: NextRequest) {
         ? analysis.decisionPoints
         : [],
       alternativePaths: p,
-      analysis: String(analysis.analysis || "Analysis complete"),
-      reasoning: analysis.reasoning || "",
+      analysis: correctedAnalysis,
+      reasoning: correctedReasoning,
       confidenceScore: analysis.confidenceScore || 75,
       confidenceReason: analysis.confidenceReason || "Analysis complete",
     };
