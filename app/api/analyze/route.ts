@@ -170,14 +170,31 @@ export async function POST(request: NextRequest) {
     // Do NOT trust Claude's complexity score - it may be incorrect
     const calculatedComplexityScore = e - n + 2 * p;
 
-    // CRITICAL: Fix reasoning & analysis text to show CORRECT complexity score, not Claude's potentially incorrect value
+    // CRITICAL: Fix reasoning & analysis text to show CORRECT complexity formula and score
     let correctedReasoning = analysis.reasoning || "";
     let correctedAnalysis = String(analysis.analysis || "Analysis complete");
 
-    // Replace any incorrect M value in both reasoning and analysis with the correct calculated one
-    const incorrectMRegex = /M\s*=\s*\d+(?!\d)/g;
-    correctedReasoning = correctedReasoning.replace(incorrectMRegex, `M = ${calculatedComplexityScore}`);
-    correctedAnalysis = correctedAnalysis.replace(incorrectMRegex, `M = ${calculatedComplexityScore}`);
+    // Generate the correct formula string
+    const correctFormula = `N=${n}, E=${e}, P=${p} → M = ${e} - ${n} + 2(${p}) = ${calculatedComplexityScore}`;
+
+    // Replace any formula pattern with the correct one
+    correctedReasoning = correctedReasoning.replace(
+      /N=\d+,\s*E=\d+,\s*P=\d+\s*→\s*M\s*=\s*[\d\s\-\+\(\)]+=/g,
+      `${correctFormula.slice(0, -` ${calculatedComplexityScore}`.length)}=`
+    );
+
+    // Also try simpler pattern if the above doesn't match
+    if (!correctedReasoning.includes(correctFormula)) {
+      correctedReasoning = correctedReasoning.replace(
+        /M\s*=\s*\d+\s*-\s*\d+\s*\+\s*2\(\d+\)\s*=\s*\d+/g,
+        correctFormula
+      );
+    }
+
+    correctedAnalysis = correctedAnalysis.replace(
+      /M\s*=\s*\d+\s*-\s*\d+\s*\+\s*2\(\d+\)\s*=\s*\d+/g,
+      correctFormula
+    );
 
     const sanitizedAnalysis = {
       nodesCount: n,
