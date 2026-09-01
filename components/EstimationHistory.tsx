@@ -43,17 +43,9 @@ export default function EstimationHistory() {
         if (response.ok) {
           const data = await response.json();
           const estimatedData = data.map((req: any) => {
-            const qaHoursPerScenario = getQAHoursPerScenario(req.complexityScore);
-            const totalScenarios = 2 * (req.paths || 1);
-            const totalQAHours = totalScenarios * qaHoursPerScenario;
-            const qaManDays = totalQAHours / 8;
-
-            const devManDays = getDevEstimation(
-              req.complexityScore,
-              req.nodesCount,
-              req.edgesCount,
-              req.paths || 1
-            );
+            // Use same formula as Proposed Estimation tab for consistency
+            const qaManDays = req.complexityScore * 0.5;
+            const devManDays = req.complexityScore * 0.8;
 
             const totalManDays = qaManDays + devManDays;
             const devTeamDays = Math.ceil(devManDays / 2);
@@ -87,32 +79,6 @@ export default function EstimationHistory() {
     fetchEstimations();
   }, []);
 
-  const getQAHoursPerScenario = (complexity: number): number => {
-    if (complexity <= 5) return 2;
-    if (complexity <= 15) return 2.5;
-    if (complexity <= 30) return 3;
-    return 4;
-  };
-
-  const getDevEstimation = (
-    m: number,
-    n: number,
-    e: number,
-    p: number
-  ): number => {
-    let baseManDays = 0;
-    if (m <= 5) {
-      baseManDays = 5;
-    } else if (m <= 15) {
-      baseManDays = 15;
-    } else if (m <= 30) {
-      baseManDays = 30;
-    } else {
-      baseManDays = 50;
-    }
-    const metricsAdjustment = n * 0.1 + e * 0.05 + p * 0.02;
-    return baseManDays + metricsAdjustment;
-  };
 
   const getComplexityColor = (complexity: number): string => {
     if (complexity <= 5) return "bg-green-50";
@@ -339,14 +305,10 @@ export default function EstimationHistory() {
                   {/* Formula */}
                   <div className="p-3 bg-slate-50 rounded border border-slate-200 text-xs text-slate-600 font-mono">
                     <p className="mb-2">
-                      <strong>QA Calculation:</strong> 2P × hrs/scenario ÷ 8 =
-                      {" "}
-                      ~{Math.round(2 * est.paths * getQAHoursPerScenario(est.complexityScore) / 8)}{" "}
-                      man days
+                      <strong>QA Calculation:</strong> M × 0.5 = {est.complexityScore} × 0.5 = ~{Math.round(est.qaManDays)} man days
                     </p>
                     <p>
-                      <strong>Dev Calculation:</strong> Base({est.complexityScore <= 5 ? "5" : est.complexityScore <= 15 ? "15" : est.complexityScore <= 30 ? "30" : "50"}) + (N×0.1 + E×0.05 + P×0.02) ={" "}
-                      ~{Math.round(est.devManDays)} man days
+                      <strong>Dev Calculation:</strong> M × 0.8 = {est.complexityScore} × 0.8 = ~{Math.round(est.devManDays)} man days
                     </p>
                   </div>
 
