@@ -317,6 +317,27 @@ export async function POST(request: NextRequest) {
         complexityScore: sanitizedAnalysis.complexityScore,
         testScenarios: sanitizedAnalysis.testScenarios,
         calculation: `M = E - N + 2P = ${sanitizedAnalysis.edgesCount} - ${sanitizedAnalysis.nodesCount} + 2(${sanitizedAnalysis.alternativePaths}) = ${sanitizedAnalysis.complexityScore}`,
+        // CRITICAL: Show extraction completeness for transparency
+        extractionMetrics: {
+          nodes: {
+            stated: sanitizedAnalysis.nodesCount,
+            extracted: sanitizedAnalysis.nodes.length,
+            percentage: ((sanitizedAnalysis.nodes.length / sanitizedAnalysis.nodesCount) * 100).toFixed(1),
+            status: sanitizedAnalysis.nodes.length >= sanitizedAnalysis.nodesCount * 0.99 ? "✓ COMPLETE" : `⚠ INCOMPLETE (missing ${sanitizedAnalysis.nodesCount - sanitizedAnalysis.nodes.length})`
+          },
+          edges: {
+            stated: sanitizedAnalysis.edgesCount,
+            extracted: sanitizedAnalysis.edges.length,
+            percentage: ((sanitizedAnalysis.edges.length / sanitizedAnalysis.edgesCount) * 100).toFixed(1),
+            status: sanitizedAnalysis.edges.length >= sanitizedAnalysis.edgesCount * 0.99 ? "✓ COMPLETE" : `⚠ INCOMPLETE (missing ${sanitizedAnalysis.edgesCount - sanitizedAnalysis.edges.length})`
+          },
+          paths: {
+            stated: sanitizedAnalysis.alternativePaths,
+            extracted: sanitizedAnalysis.paths.length,
+            percentage: ((sanitizedAnalysis.paths.length / sanitizedAnalysis.alternativePaths) * 100).toFixed(1),
+            status: sanitizedAnalysis.paths.length >= sanitizedAnalysis.alternativePaths * 0.99 ? "✓ COMPLETE" : `⚠ INCOMPLETE (missing ${sanitizedAnalysis.alternativePaths - sanitizedAnalysis.paths.length})`
+          }
+        },
         nodes: sanitizedAnalysis.nodes,
         edges: sanitizedAnalysis.edges,
         pathsList: sanitizedAnalysis.paths,
