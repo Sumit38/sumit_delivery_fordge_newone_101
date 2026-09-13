@@ -176,28 +176,54 @@ M = E - N + 2P = [number]`,
     if (m === null) m = extractNumber(/M\s*[:=]\s*(\d+)/);
     if (m === null) m = extractNumber(/Complexity.*?(\d+)/i);
 
-    // Validate extraction
+    // Validate extraction - be strict about this
+    console.log("📊 Extraction Results:");
+    console.log(`   N: ${n}, E: ${e}, P: ${p}, M: ${m}`);
+    console.log(`   Nodes extracted: ${nodesList.length}`);
+    console.log(`   Edges extracted: ${edgesList.length}`);
+    console.log(`   Paths extracted: ${pathsList.length}`);
+
     if (n === null || e === null || p === null || m === null) {
-      console.log("⚠️ Could not extract values. Found:");
-      console.log(`  N: ${n}, E: ${e}, P: ${p}, M: ${m}`);
-      console.log("\n📋 Full Claude response:");
-      console.log(fullText);
+      console.error("❌ CRITICAL: Could not extract N, E, P, or M values!");
+      console.error(`  N: ${n}, E: ${e}, P: ${p}, M: ${m}`);
+      console.error("\n📋 Full Claude response:");
+      console.error(fullText);
       return createFallbackAnalysis();
     }
 
     // CRITICAL: Validate graph structure (E >= N-1 for connected graph)
     // If invalid, it's likely hallucination or incomplete analysis
     if (e < n - 1) {
-      console.warn(`⚠️ Invalid graph structure: E(${e}) < N-1(${n-1}). Graph is disconnected.`);
-      console.warn(`This indicates incomplete analysis. Using fallback.`);
+      console.error(`❌ CRITICAL: Invalid graph structure detected!`);
+      console.error(`   E(${e}) < N-1(${n-1}). Graph is disconnected.`);
+      console.error(`   This indicates incomplete/hallucinated analysis.`);
+      console.error(`   Nodes: ${nodesList.length} extracted vs ${n} stated`);
+      console.error(`   Edges: ${edgesList.length} extracted vs ${e} stated`);
+      console.error(`   Paths: ${pathsList.length} extracted vs ${p} stated`);
       return createFallbackAnalysis();
+    }
+
+    // CRITICAL: Check if extracted data matches stated counts
+    if (nodesList.length < n * 0.8 || edgesList.length < e * 0.8 || pathsList.length < p * 0.8) {
+      console.error(`⚠️ WARNING: Extracted data significantly less than stated counts!`);
+      console.error(`   Nodes: extracted ${nodesList.length} vs stated ${n} (${((nodesList.length/n)*100).toFixed(0)}%)`);
+      console.error(`   Edges: extracted ${edgesList.length} vs stated ${e} (${((edgesList.length/e)*100).toFixed(0)}%)`);
+      console.error(`   Paths: extracted ${pathsList.length} vs stated ${p} (${((pathsList.length/p)*100).toFixed(0)}%)`);
+      console.error(`   This suggests parsing or analysis issues!`);
     }
 
     // Validate M calculation: should be M = E - N + 2P
     const calculatedM = e - n + 2 * p;
     if (calculatedM < 0) {
-      console.warn(`⚠️ Negative complexity detected: M = ${calculatedM}. Invalid analysis.`);
+      console.error(`❌ CRITICAL: Negative complexity detected: M = ${calculatedM}. Invalid analysis.`);
       return createFallbackAnalysis();
+    }
+
+    // Warn if calculated M doesn't match extracted M
+    if (m !== calculatedM) {
+      console.warn(`⚠️ M value mismatch: Claude said ${m}, but formula gives ${calculatedM}`);
+      console.warn(`   Using calculated value: ${calculatedM}`);
+      m = calculatedM;
     }
 
 
@@ -249,7 +275,7 @@ M = E - N + 2P = [number]`,
 }
 
 function createFallbackAnalysis(): ComplexityAnalysis {
-  console.log("⚠️ Using fallback analysis");
+  console.error("🚨 FALLBACK TRIGGERED: Analysis failed validation. Returning minimal default.");
   return {
     nodes: [],
     edges: [],
@@ -262,6 +288,9 @@ function createFallbackAnalysis(): ComplexityAnalysis {
     analysis: "Fallback analysis - unable to calculate",
     decisionPoints: [],
     alternativePaths: 5,
+    reasoning: "Analysis could not be properly parsed or validated. Please review the requirement and try again.",
+    confidenceScore: 0,  // ← ZERO confidence, not 75!
+    confidenceReason: "Failed to validate analysis - fallback used",
   };
 }
 
@@ -304,30 +333,39 @@ function calculateConfidenceScore(
     reasons.push("High complexity - manual review recommended");
   }
 
-  // Check 5: Data extraction quality
+  // Check 5: Data extraction quality - CRITICAL for analysis quality
   if (nodes.length === 0 || edges.length === 0) {
-    score -= 20;
-    reasons.push("Incomplete node or edge extraction");
+    score -= 30;  // Increased penalty from 20 to 30
+    reasons.push("❌ CRITICAL: No nodes or edges extracted!");
+  } else if (nodes.length < n * 0.8 || edges.length < e * 0.8) {
+    score -= 20;  // Increased penalty from 5
+    reasons.push("⚠️ Major: <80% of nodes/edges extracted");
   } else if (nodes.length < n || edges.length < e) {
-    score -= 5;
-    reasons.push("Some nodes/edges may be missing");
+    score -= 10;  // Increased from 5
+    reasons.push("Minor: Some nodes/edges may be missing");
   }
 
   // Check 6: Reasoning quality
   if (!reasoning || reasoning.length < 50) {
-    score -= 10;
-    reasons.push("Limited reasoning provided");
+    score -= 15;  // Increased from 10
+    reasons.push("⚠️ Limited reasoning provided (<50 chars)");
+  } else if (reasoning.length < 100) {
+    score -= 5;
+    reasons.push("Reasoning could be more detailed");
   } else if (reasoning.includes("loop") || reasoning.includes("parallel") || reasoning.includes("error")) {
-    reasons.push("Complex flows identified");
+    reasons.push("✓ Complex flows identified in reasoning");
   }
 
   // Check 7: Path validation
   if (paths.length === 0) {
-    score -= 15;
-    reasons.push("No paths extracted");
+    score -= 25;  // Increased from 15
+    reasons.push("❌ CRITICAL: No paths extracted!");
+  } else if (paths.length < p * 0.8) {
+    score -= 15;  // Increased penalty
+    reasons.push("⚠️ Major: <80% of paths extracted");
   } else if (paths.length < p) {
     score -= 5;
-    reasons.push("Some paths may be missing");
+    reasons.push("Minor: Some paths may be missing");
   }
 
   // Ensure score stays in valid range
