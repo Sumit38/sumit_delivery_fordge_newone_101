@@ -296,47 +296,55 @@ function calculateConfidenceScoreUsingDecisionGraph(
   const validationResults: { question: string; isClear: boolean; reason: string }[] = [];
 
   // QUESTION 1: "How many nodes identified?"
-  // Decision Graph: Is N value specific? Is it reasonable for requirement complexity?
-  const q1Clear = n > 0 && n <= 100; // Specific number, reasonable range
+  // Decision Graph: Are ALL nodes extracted and listed?
+  // CRITICAL: If N=29, must extract ALL 29 nodes (not just some)
+  const nodesMatch = nodes.length >= n * 0.95; // Allow 5% rounding
+  const q1Clear = n > 0 && n <= 100 && nodesMatch;
   validationResults.push({
     question: "Nodes identified (N)",
     isClear: q1Clear,
-    reason: q1Clear ? `✓ Specific: ${n} nodes` : `❌ Vague: N=${n} (unreasonable)`,
+    reason: q1Clear
+      ? `✓ Clear: ${nodes.length}/${n} nodes extracted (COMPLETE)`
+      : `❌ CRITICAL: ${nodes.length}/${n} nodes extracted (INCOMPLETE - missing ${n - nodes.length})`,
   });
 
   // QUESTION 2: "What are the edges identified?"
-  // Decision Graph: Are edges extracted? Do they match stated count? Are they specific?
-  const q2Clear = edges.length > 0 && edges.length >= e * 0.8;
+  // Decision Graph: Are edges extracted? Do they MATCH stated count exactly?
+  // CRITICAL: ALL edges must be extracted, not just 80%
+  const edgesMatch = edges.length === e || edges.length >= e * 0.95; // Allow small rounding difference
+  const q2Clear = edges.length > 0 && edgesMatch;
   validationResults.push({
     question: "Edges identified (E)",
     isClear: q2Clear,
     reason: q2Clear
-      ? `✓ Clear: ${edges.length} edges extracted (stated: ${e})`
-      : `❌ Vague: ${edges.length} extracted vs ${e} stated (<80%)`,
+      ? `✓ Clear: ${edges.length}/${e} edges extracted (COMPLETE)`
+      : `❌ CRITICAL: ${edges.length}/${e} edges extracted (INCOMPLETE - missing ${e - edges.length})`,
   });
 
   // QUESTION 3: "What are the distinct paths?"
-  // Decision Graph: Are paths extracted? Do they show concrete routes? Are they specific?
-  const q3Clear = paths.length > 0 && paths.length >= p * 0.8;
+  // Decision Graph: Are ALL paths extracted and listed?
+  // CRITICAL: If P=20, must extract ALL 20 paths (not just some)
+  const pathsMatch = paths.length >= p * 0.95; // Allow 5% rounding
+  const q3Clear = paths.length > 0 && pathsMatch;
   validationResults.push({
     question: "Distinct paths (P)",
     isClear: q3Clear,
     reason: q3Clear
-      ? `✓ Clear: ${paths.length} paths traced (stated: ${p})`
-      : `❌ Vague: ${paths.length} extracted vs ${p} stated (<80%)`,
+      ? `✓ Clear: ${paths.length}/${p} paths traced (COMPLETE)`
+      : `❌ CRITICAL: ${paths.length}/${p} paths traced (INCOMPLETE - missing ${p - paths.length})`,
   });
 
   // QUESTION 4: "Are N, E, P values consistent?"
-  // Decision Graph: Do extracted counts match stated values? Is graph structure valid?
+  // Decision Graph: Do EXTRACTED counts MATCH STATED values? Must be COMPLETE!
   const graphValid = e >= n - 1; // Connected graph check
-  const countsMatch = nodes.length >= n * 0.8 && edges.length >= e * 0.8 && paths.length >= p * 0.8;
-  const q4Clear = graphValid && countsMatch;
+  const countsCompleteMatch = nodes.length >= n * 0.95 && edges.length >= e * 0.95 && paths.length >= p * 0.95;
+  const q4Clear = graphValid && countsCompleteMatch;
   validationResults.push({
     question: "Graph structure validity",
     isClear: q4Clear,
     reason: q4Clear
-      ? `✓ Clear: Valid graph (E≥N-1, counts match)`
-      : `❌ Vague: Invalid structure (E<N-1 or counts mismatch)`,
+      ? `✓ Clear: VALID & COMPLETE (N:${nodes.length}/${n}, E:${edges.length}/${e}, P:${paths.length}/${p})`
+      : `❌ CRITICAL: Incomplete extraction (N:${nodes.length}/${n}, E:${edges.length}/${e}, P:${paths.length}/${p})`,
   });
 
   // QUESTION 5: "What is the detailed reasoning?"
