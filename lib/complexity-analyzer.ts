@@ -349,7 +349,7 @@ function calculateConfidenceScoreUsingDecisionGraph(
 
   // QUESTION 5: "What is the detailed reasoning?"
   // Decision Graph: Is reasoning specific? Does it explain the analysis? Length check?
-  const q5Clear = reasoning && reasoning.length > 100 && !reasoning.toLowerCase().includes("unclear");
+  const q5Clear = !!(reasoning && reasoning.length > 100 && !reasoning.toLowerCase().includes("unclear"));
   validationResults.push({
     question: "Reasoning provided",
     isClear: q5Clear,
