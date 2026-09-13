@@ -254,6 +254,32 @@ M = E - N + 2P = [number]`,
     console.log(`✅ TEST SCENARIOS REQUIRED (2P): ${testScenarios}`);
     console.log(`\n📊 CONFIDENCE SCORE: ${confidenceData.score}% - ${confidenceData.reason}\n`);
 
+    // CRITICAL FIX: If edges array is empty but we have paths, reconstruct edges from paths
+    // This ensures edges data is never missing from the downloaded analysis
+    if (edgesList.length === 0 && pathsList.length > 0) {
+      console.log("⚠️ Reconstructing edges from paths (parsing failed or Claude didn't format edges)...");
+      const uniqueEdges = new Map<string, { from: string; to: string; condition?: string }>();
+
+      pathsList.forEach((path) => {
+        for (let i = 0; i < path.length - 1; i++) {
+          const from = path[i].trim();
+          const to = path[i + 1].trim();
+          const edgeKey = `${from}|${to}`;
+
+          if (!uniqueEdges.has(edgeKey) && from && to) {
+            uniqueEdges.set(edgeKey, {
+              from: from,
+              to: to,
+              condition: `transition from ${from} to ${to}`
+            });
+          }
+        }
+      });
+
+      edgesList = Array.from(uniqueEdges.values());
+      console.log(`✅ Reconstructed ${edgesList.length} edges from ${pathsList.length} paths`);
+    }
+
     return {
       nodes: nodesList,
       edges: edgesList,
