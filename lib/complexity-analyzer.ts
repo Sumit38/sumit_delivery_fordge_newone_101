@@ -236,8 +236,12 @@ M = E - N + 2P = [number]`,
       reasoning = reasoningMatch[1].trim();
     }
 
-    // Calculate confidence score based on multiple validation factors
-    const confidenceData = calculateConfidenceScore(n, e, p, nodesList, edgesList, pathsList, reasoning);
+    // Calculate confidence score using DECISION MAKING GRAPH (Q&A validation)
+    const confidenceData = calculateConfidenceScoreUsingDecisionGraph(
+      n, e, p,
+      nodesList, edgesList, pathsList,
+      reasoning, fullText
+    );
 
     console.log("\n🧮 FORMULA CALCULATION (McCabe Cyclomatic Complexity):");
     console.log(`   N (Nodes) = ${n}`);
@@ -274,6 +278,120 @@ M = E - N + 2P = [number]`,
   }
 }
 
+/**
+ * NEW: Calculate confidence using DECISION MAKING GRAPH approach
+ * For each Q&A pair, run a decision graph to validate if answer is CLEAR or VAGUE
+ * Confidence = (Clear Answers / Total Questions) × 100
+ */
+function calculateConfidenceScoreUsingDecisionGraph(
+  n: number,
+  e: number,
+  p: number,
+  nodes: string[],
+  edges: Array<{ from: string; to: string; condition?: string }>,
+  paths: string[][],
+  reasoning: string,
+  fullText: string
+): { score: number; reason: string } {
+  const validationResults: { question: string; isClear: boolean; reason: string }[] = [];
+
+  // QUESTION 1: "How many nodes identified?"
+  // Decision Graph: Is N value specific? Is it reasonable for requirement complexity?
+  const q1Clear = n > 0 && n <= 100; // Specific number, reasonable range
+  validationResults.push({
+    question: "Nodes identified (N)",
+    isClear: q1Clear,
+    reason: q1Clear ? `✓ Specific: ${n} nodes` : `❌ Vague: N=${n} (unreasonable)`,
+  });
+
+  // QUESTION 2: "What are the edges identified?"
+  // Decision Graph: Are edges extracted? Do they match stated count? Are they specific?
+  const q2Clear = edges.length > 0 && edges.length >= e * 0.8;
+  validationResults.push({
+    question: "Edges identified (E)",
+    isClear: q2Clear,
+    reason: q2Clear
+      ? `✓ Clear: ${edges.length} edges extracted (stated: ${e})`
+      : `❌ Vague: ${edges.length} extracted vs ${e} stated (<80%)`,
+  });
+
+  // QUESTION 3: "What are the distinct paths?"
+  // Decision Graph: Are paths extracted? Do they show concrete routes? Are they specific?
+  const q3Clear = paths.length > 0 && paths.length >= p * 0.8;
+  validationResults.push({
+    question: "Distinct paths (P)",
+    isClear: q3Clear,
+    reason: q3Clear
+      ? `✓ Clear: ${paths.length} paths traced (stated: ${p})`
+      : `❌ Vague: ${paths.length} extracted vs ${p} stated (<80%)`,
+  });
+
+  // QUESTION 4: "Are N, E, P values consistent?"
+  // Decision Graph: Do extracted counts match stated values? Is graph structure valid?
+  const graphValid = e >= n - 1; // Connected graph check
+  const countsMatch = nodes.length >= n * 0.8 && edges.length >= e * 0.8 && paths.length >= p * 0.8;
+  const q4Clear = graphValid && countsMatch;
+  validationResults.push({
+    question: "Graph structure validity",
+    isClear: q4Clear,
+    reason: q4Clear
+      ? `✓ Clear: Valid graph (E≥N-1, counts match)`
+      : `❌ Vague: Invalid structure (E<N-1 or counts mismatch)`,
+  });
+
+  // QUESTION 5: "What is the detailed reasoning?"
+  // Decision Graph: Is reasoning specific? Does it explain the analysis? Length check?
+  const q5Clear = reasoning && reasoning.length > 100 && !reasoning.toLowerCase().includes("unclear");
+  validationResults.push({
+    question: "Reasoning provided",
+    isClear: q5Clear,
+    reason: q5Clear
+      ? `✓ Clear: ${reasoning.length} chars of detailed reasoning`
+      : `❌ Vague: Reasoning too short (<100 chars) or unclear`,
+  });
+
+  // QUESTION 6: "Are decision points identified?"
+  // Decision Graph: Are specific decision points listed? Are they concrete?
+  const hasDecisionPoints = fullText.includes("decision") && nodes.length > 0;
+  const q6Clear = hasDecisionPoints;
+  validationResults.push({
+    question: "Decision points identified",
+    isClear: q6Clear,
+    reason: q6Clear
+      ? `✓ Clear: Decision points explicitly identified`
+      : `❌ Vague: No specific decision points mentioned`,
+  });
+
+  // CALCULATE CONFIDENCE
+  const clearAnswers = validationResults.filter((r) => r.isClear).length;
+  const totalQuestions = validationResults.length;
+  const confidenceScore = Math.round((clearAnswers / totalQuestions) * 100);
+
+  // Build detailed reason
+  console.log("\n📊 DECISION MAKING GRAPH RESULTS:");
+  validationResults.forEach((v) => {
+    console.log(`   ${v.reason}`);
+  });
+
+  const clearCount = clearAnswers;
+  const vagueCount = totalQuestions - clearAnswers;
+
+  let finalReason = "";
+  if (confidenceScore >= 80) {
+    finalReason = `High confidence - ${clearCount}/${totalQuestions} answers clear`;
+  } else if (confidenceScore >= 60) {
+    finalReason = `Moderate confidence - ${clearCount}/${totalQuestions} answers clear`;
+  } else if (confidenceScore >= 40) {
+    finalReason = `Lower confidence - ${clearCount}/${totalQuestions} answers clear`;
+  } else {
+    finalReason = `Low confidence - only ${clearCount}/${totalQuestions} answers clear (${vagueCount} vague)`;
+  }
+
+  console.log(`\n✅ CONFIDENCE SCORE: ${confidenceScore}% (${clearCount} clear / ${vagueCount} vague)\n`);
+
+  return { score: confidenceScore, reason: finalReason };
+}
+
 function createFallbackAnalysis(): ComplexityAnalysis {
   console.error("🚨 FALLBACK TRIGGERED: Analysis failed validation. Returning minimal default.");
   return {
@@ -294,101 +412,8 @@ function createFallbackAnalysis(): ComplexityAnalysis {
   };
 }
 
-function calculateConfidenceScore(
-  n: number,
-  e: number,
-  p: number,
-  nodes: string[],
-  edges: Array<{ from: string; to: string; condition?: string }>,
-  paths: string[][],
-  reasoning: string
-): { score: number; reason: string } {
-  let score = 85; // Start with baseline high confidence
-  let reasons: string[] = [];
-
-  // Check 1: Graph structure validity (E >= N for connected graphs)
-  if (e < n - 1) {
-    score -= 15;
-    reasons.push("Graph may be disconnected");
-  } else if (e >= n) {
-    reasons.push("Well-formed graph structure");
-  }
-
-  // Check 2: Path count sanity check
-  const maxPossiblePaths = Math.pow(2, Math.min(n - 2, 10)); // Cap at 2^10 for calculation
-  if (p > maxPossiblePaths) {
-    score -= 10;
-    reasons.push("Path count seems high");
-  }
-
-  // Check 3: Minimal complexity check
-  if (n <= 3 && e <= 2 && p === 1) {
-    score -= 5;
-    reasons.push("Very simple requirement");
-  }
-
-  // Check 4: Complex requirement check
-  if (n > 20 || p > 10) {
-    score -= 10;
-    reasons.push("High complexity - manual review recommended");
-  }
-
-  // Check 5: Data extraction quality - CRITICAL for analysis quality
-  if (nodes.length === 0 || edges.length === 0) {
-    score -= 30;  // Increased penalty from 20 to 30
-    reasons.push("❌ CRITICAL: No nodes or edges extracted!");
-  } else if (nodes.length < n * 0.8 || edges.length < e * 0.8) {
-    score -= 20;  // Increased penalty from 5
-    reasons.push("⚠️ Major: <80% of nodes/edges extracted");
-  } else if (nodes.length < n || edges.length < e) {
-    score -= 10;  // Increased from 5
-    reasons.push("Minor: Some nodes/edges may be missing");
-  }
-
-  // Check 6: Reasoning quality
-  if (!reasoning || reasoning.length < 50) {
-    score -= 15;  // Increased from 10
-    reasons.push("⚠️ Limited reasoning provided (<50 chars)");
-  } else if (reasoning.length < 100) {
-    score -= 5;
-    reasons.push("Reasoning could be more detailed");
-  } else if (reasoning.includes("loop") || reasoning.includes("parallel") || reasoning.includes("error")) {
-    reasons.push("✓ Complex flows identified in reasoning");
-  }
-
-  // Check 7: Path validation
-  if (paths.length === 0) {
-    score -= 25;  // Increased from 15
-    reasons.push("❌ CRITICAL: No paths extracted!");
-  } else if (paths.length < p * 0.8) {
-    score -= 15;  // Increased penalty
-    reasons.push("⚠️ Major: <80% of paths extracted");
-  } else if (paths.length < p) {
-    score -= 5;
-    reasons.push("Minor: Some paths may be missing");
-  }
-
-  // Ensure score stays in valid range
-  score = Math.max(0, Math.min(100, score));
-
-  // Build confidence reason
-  let finalReason = "";
-  if (score >= 80) {
-    finalReason = "High confidence - detailed analysis completed";
-  } else if (score >= 60) {
-    finalReason = "Moderate confidence - some complexity noted";
-  } else if (score >= 40) {
-    finalReason = "Lower confidence - manual review recommended";
-  } else {
-    finalReason = "Low confidence - requires manual verification";
-  }
-
-  if (reasons.length > 0) {
-    finalReason += ` (${reasons.slice(0, 2).join(", ")})`;
-  }
-
-  return { score, reason: finalReason };
-}
+// OLD FUNCTION REPLACED: calculateConfidenceScore
+// Now using: calculateConfidenceScoreUsingDecisionGraph (Q&A validation approach)
 
 export function getComplexityLevel(
   complexity: number
