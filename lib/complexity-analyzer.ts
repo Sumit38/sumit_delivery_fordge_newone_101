@@ -447,19 +447,23 @@ M = E - N + 2P = [number]`,
       console.log("⚠️ Reconstructing edges from paths (parsing failed or Claude didn't format edges)...");
       const uniqueEdges = new Map<string, { from: string; to: string; condition?: string }>();
 
-      pathsList.forEach((pathItem) => {
+      pathsList.forEach((pathItem: any) => {
         // Handle both string paths (with →) and array paths
         let nodes: string[] = [];
 
+        // Check if it's a string
         if (typeof pathItem === 'string') {
+          const pathStr = pathItem as string;
           // Filter out title lines (start with ** or --)
-          if (pathItem.startsWith('**') || pathItem.startsWith('--') || pathItem.startsWith('##')) {
+          if (pathStr.startsWith('**') || pathStr.startsWith('--') || pathStr.startsWith('##')) {
             return; // Skip titles and separators
           }
           // Split by arrow notation
-          nodes = pathItem.split('→').map((node) => node.trim()).filter((node) => node.length > 0);
+          nodes = pathStr.split('→').map((node: string) => node.trim()).filter((node: string) => node.length > 0);
         } else if (Array.isArray(pathItem)) {
-          nodes = pathItem as string[];
+          // If it's an array, join it into a string and split
+          const pathStr = (pathItem as string[]).join(' → ');
+          nodes = pathStr.split('→').map((node: string) => node.trim()).filter((node: string) => node.length > 0);
         }
 
         // Create edges from consecutive nodes
