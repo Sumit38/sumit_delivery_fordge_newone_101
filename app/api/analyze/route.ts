@@ -352,12 +352,15 @@ export async function POST(request: NextRequest) {
         reasoning: sanitizedAnalysis.reasoning,
         confidenceScore: sanitizedAnalysis.confidenceScore,
         confidenceReason: sanitizedAnalysis.confidenceReason,
-        // DUAL-PATH SYSTEM: Show which analysis path was used
+        // THREE-PATH SYSTEM: Show which analysis path was used
         analysispath: sanitizedAnalysis.analyzedScenarios?.analysisPath || "direct",
         analyzedScenarios: sanitizedAnalysis.analyzedScenarios,
-        analysisMethod: sanitizedAnalysis.analyzedScenarios?.analysisPath === "guided"
-          ? "Guided Analysis: Extracted only answered scenarios (Path 1)"
-          : "Direct Analysis: Analyzed full requirement text (Path 2)",
+        analysisMethod:
+          sanitizedAnalysis.analyzedScenarios?.analysisPath === "guided"
+            ? "Guided Analysis: Pure facts from answered questions (Path 1)"
+            : sanitizedAnalysis.analyzedScenarios?.analysisPath === "hybrid"
+            ? "Hybrid Analysis: Facts + Intelligent Inference (Path 2)"
+            : "Direct Analysis: Analyzed full requirement text (Path 3)",
       },
     };
 

@@ -35,6 +35,57 @@ export interface ComplexityAnalysis {
   };
 }
 
+// Inference rules: Map keywords to likely question numbers
+const inferenceRules: { [key: number]: { keywords: string[]; description: string } } = {
+  2: { keywords: ['concurrent', 'simultaneous', 'parallel', 'users'], description: 'Multiple concurrent users' },
+  3: { keywords: ['permission', 'role', 'access', 'authorize', 'security'], description: 'Role-based access' },
+  4: { keywords: ['error', 'retry', 'fallback', 'exception', 'failure', 'handle'], description: 'Error handling' },
+  6: { keywords: ['validate', 'check', 'verify', 'validation', 'quality', 'sanitize'], description: 'Data validation' },
+  7: { keywords: ['approval', 'review', 'authorize', 'reject', 'accept', 'workflow'], description: 'Approval workflow' },
+  8: { keywords: ['duplicate', 'same location', 'reschedule', 'recheck'], description: 'Duplicate handling' },
+  9: { keywords: ['edit', 'delete', 'modify', 'change', 'remove', 'update'], description: 'Edit/delete capability' },
+  10: { keywords: ['report', 'export', 'visualization', 'dashboard', 'analytics', 'chart'], description: 'Reports/visualizations' },
+  11: { keywords: ['multiple language', 'localization', 'translation', 'regional', 'i18n'], description: 'Multi-language support' },
+  12: { keywords: ['integration', 'sync', 'connect', 'api', 'external', 'erp', 'bi'], description: 'System integration' },
+  13: { keywords: ['historical', 'archive', 'retention', 'storage', 'tiered', 'backup'], description: 'Data retention' },
+  14: { keywords: ['offline', 'sync', 'cache', 'queue', 'connectivity'], description: 'Offline capability' },
+  15: { keywords: ['mobile', 'app', 'progressive', 'pwa', 'push notification'], description: 'Mobile support' },
+};
+
+function inferQuestionsFromRequirement(
+  requirementText: string,
+  answeredQuestions: QuestionMetadata[]
+): QuestionMetadata[] {
+  const requirementLower = requirementText.toLowerCase();
+  const answeredQNumbers = new Set(answeredQuestions.map(q => q.questionNumber));
+  const inferred: QuestionMetadata[] = [];
+
+  // Check each inference rule
+  Object.entries(inferenceRules).forEach(([qNum, rule]) => {
+    const questionNumber = parseInt(qNum);
+
+    // Skip if already answered
+    if (answeredQNumbers.has(questionNumber)) return;
+
+    // Check if keywords match
+    const matchCount = rule.keywords.filter(keyword =>
+      requirementLower.includes(keyword)
+    ).length;
+
+    // If 2+ keywords match, consider it inferred
+    if (matchCount >= 2) {
+      inferred.push({
+        questionNumber,
+        question: rule.description,
+        answer: `(Inferred from requirement text - ${matchCount} keyword matches)`,
+        isAnswered: true, // Treat as analyzed for extraction
+      });
+    }
+  });
+
+  return inferred;
+}
+
 export async function analyzeRequirementComplexity(
   requirementText: string,
   questionsMetadata?: QuestionMetadata[]
@@ -42,16 +93,41 @@ export async function analyzeRequirementComplexity(
   try {
     console.log("🔍 Analyzing requirement with cyclomatic complexity formula...");
 
-    // Calculate question coverage (FACTS-BASED, NO BIAS)
+    // Calculate question coverage
     const totalQuestions = 15;
-    const answeredQuestions = questionsMetadata?.filter(q => q.isAnswered).length || 0;
-    const skippedQuestions = totalQuestions - answeredQuestions;
-    const coveragePercentage = Math.round((answeredQuestions / totalQuestions) * 100);
+    const answeredQuestions = questionsMetadata?.filter(q => q.isAnswered) || [];
+    const answeredCount = answeredQuestions.length;
 
-    console.log(`📊 Question Coverage: ${answeredQuestions}/${totalQuestions} answered (${coveragePercentage}%)`);
-    if (questionsMetadata && questionsMetadata.length > 0) {
-      questionsMetadata.forEach(q => {
-        console.log(`   Q${q.questionNumber}: ${q.isAnswered ? '✓ ANALYZED' : '⊘ SKIPPED'} - "${q.question}"`);
+    // HYBRID APPROACH: Infer unanswered questions from requirement text
+    let inferredQuestions: QuestionMetadata[] = [];
+    let analysispath = "direct";
+
+    if (answeredCount > 0 && answeredCount < 8) {
+      // HYBRID PATH: User answered some but not all
+      analysispath = "hybrid";
+      inferredQuestions = inferQuestionsFromRequirement(requirementText, answeredQuestions);
+      console.log(`\n🧠 HYBRID PATH: ${answeredCount} answered + ${inferredQuestions.length} inferred`);
+    } else if (answeredCount >= 8) {
+      // GUIDED PATH: User answered most questions
+      analysispath = "guided";
+      console.log(`\n📝 GUIDED PATH: ${answeredCount} questions answered`);
+    } else {
+      // DIRECT PATH: No questions answered
+      analysispath = "direct";
+      console.log(`\n🚀 DIRECT PATH: No questions provided, analyzing requirement text`);
+    }
+
+    // Combine answered + inferred for analysis
+    const allAnalyzedQuestions = [...answeredQuestions, ...inferredQuestions];
+    const totalAnalyzed = allAnalyzedQuestions.length;
+    const coveragePercentage = Math.round((totalAnalyzed / totalQuestions) * 100);
+
+    console.log(`📊 Coverage: ${answeredCount} answered + ${inferredQuestions.length} inferred = ${totalAnalyzed}/${totalQuestions} (${coveragePercentage}%)`);
+
+    if (allAnalyzedQuestions.length > 0) {
+      allAnalyzedQuestions.forEach(q => {
+        const type = inferredQuestions.some(iq => iq.questionNumber === q.questionNumber) ? 'INFERRED' : 'ANSWERED';
+        console.log(`   Q${q.questionNumber}: ✓ ${type} - "${q.question}"`);
       });
     }
 
@@ -67,22 +143,24 @@ export async function analyzeRequirementComplexity(
 REQUIREMENT:
 ${requirementText}
 
-${questionsMetadata && questionsMetadata.length > 0 ? `
-ANALYZED SCENARIOS (Questions Answered):
-${questionsMetadata
-  .filter(q => q.isAnswered)
-  .map(q => `- Q${q.questionNumber}: ${q.question}\n  Answer: ${q.answer}`)
+${allAnalyzedQuestions.length > 0 ? `
+ANALYZED SCENARIOS (Answered + Intelligently Inferred):
+${allAnalyzedQuestions
+  .map(q => {
+    const isInferred = inferredQuestions.some(iq => iq.questionNumber === q.questionNumber);
+    return `- Q${q.questionNumber} ${isInferred ? '[INFERRED]' : '[ANSWERED]'}: ${q.question}\n  ${isInferred ? 'Inference: ' : 'Answer: '}${q.answer}`;
+  })
   .join('\n')}
 
-SKIPPED SCENARIOS (Questions Not Answered - DO NOT EXTRACT PATHS FOR THESE):
+SKIPPED SCENARIOS (NOT analyzed - DO NOT EXTRACT PATHS FOR THESE):
 ${questionsMetadata
-  .filter(q => !q.isAnswered)
+  ?.filter(q => !q.isAnswered && !inferredQuestions.some(iq => iq.questionNumber === q.questionNumber))
   .map(q => `- Q${q.questionNumber}: ${q.question}`)
-  .join('\n')}
+  .join('\n') || 'None'}
 
 CRITICAL INSTRUCTION: Extract nodes, edges, and paths ONLY for the analyzed scenarios above.
-Do NOT guess or hallucinate paths for skipped questions. The complexity must reflect only
-the analyzed scenarios, not theoretical or unspecified functionality.
+For INFERRED scenarios, extract based on context. Do NOT guess or hallucinate paths for
+truly skipped questions. The complexity must reflect only the analyzed scenarios.
 ` : ''}
 
 STEP-BY-STEP INSTRUCTIONS:
@@ -282,23 +360,36 @@ M = E - N + 2P = [number]`,
       reasoning = reasoningMatch[1].trim();
     }
 
-    // DUAL-PATH CONFIDENCE SYSTEM (NO BIAS, FACTS-BASED)
+    // THREE-PATH CONFIDENCE SYSTEM (NO BIAS, INTELLIGENT)
     let confidenceData: { score: number; reason: string; analysispath?: string };
 
-    if (questionsMetadata && questionsMetadata.length > 0 && answeredQuestions > 0) {
-      // PATH 1: GUIDED ANALYSIS (User answered some questions)
-      // Confidence = (Answered Questions / 15) × 100
-      const factsBasedConfidence = coveragePercentage;
+    if (analysispath === "guided") {
+      // PATH 1: GUIDED (User answered 8-15 questions)
+      // Confidence = (Answered / 15) × 100
       confidenceData = {
-        score: factsBasedConfidence,
-        reason: `${answeredQuestions}/15 scenarios analyzed (${coveragePercentage}% coverage) - GUIDED PATH`,
+        score: coveragePercentage,
+        reason: `${answeredCount}/15 questions answered (${coveragePercentage}% coverage) - GUIDED PATH`,
         analysispath: "guided"
       };
-      console.log(`\n📊 PATH 1 (GUIDED): ${answeredQuestions}/15 questions answered`);
+      console.log(`\n📊 PATH 1 (GUIDED): Pure facts from ${answeredCount}/15 questions`);
+
+    } else if (analysispath === "hybrid") {
+      // PATH 2: HYBRID (User answered 2-7 questions + intelligent inference)
+      // Confidence = (Answered + Inferred) / 15 × 100
+      const hybridConfidence = coveragePercentage;
+      const factsPercentage = Math.round((answeredCount / totalQuestions) * 100);
+      const inferencePercentage = Math.round((inferredQuestions.length / totalQuestions) * 100);
+
+      confidenceData = {
+        score: hybridConfidence,
+        reason: `${answeredCount}/15 answered (${factsPercentage}%) + ${inferredQuestions.length}/15 inferred (${inferencePercentage}%) = ${hybridConfidence}% - HYBRID PATH`,
+        analysispath: "hybrid"
+      };
+      console.log(`\n📊 PATH 2 (HYBRID): ${answeredCount} facts + ${inferredQuestions.length} inferred = ${totalAnalyzed} total`);
+
     } else {
-      // PATH 2: DIRECT ANALYSIS (User skipped questions, analyzing raw requirement)
-      // Confidence based on requirement text detail level (0-100)
-      const requirementLength = requirementText.length;
+      // PATH 3: DIRECT (User skipped all questions, analyzing raw requirement)
+      // Confidence based on requirement detail level (0-100)
       const wordCount = requirementText.split(/\s+/).length;
 
       // Heuristic: longer, more detailed requirements = higher confidence
@@ -322,7 +413,7 @@ M = E - N + 2P = [number]`,
         reason: `Direct analysis of ${wordCount} words with ${indicatorCount} complexity indicators - DIRECT PATH`,
         analysispath: "direct"
       };
-      console.log(`\n📊 PATH 2 (DIRECT): ${wordCount} words, ${indicatorCount} complexity indicators detected`);
+      console.log(`\n📊 PATH 3 (DIRECT): ${wordCount} words, ${indicatorCount} indicators detected`);
     }
 
     console.log("\n🧮 FORMULA CALCULATION (McCabe Cyclomatic Complexity):");
@@ -379,20 +470,40 @@ M = E - N + 2P = [number]`,
       reasoning: reasoning,
       confidenceScore: confidenceData.score,
       confidenceReason: confidenceData.reason,
-      // DUAL-PATH METRICS: Show which analysis path was used
-      analyzedScenarios: questionsMetadata && questionsMetadata.length > 0 ? {
-        analysisPath: "guided",
+      // THREE-PATH METRICS: Show analysis path and breakdown
+      analyzedScenarios: {
+        analysisPath: analysispath,
         totalQuestions: totalQuestions,
-        answeredQuestions: answeredQuestions,
-        skippedQuestions: skippedQuestions,
-        coveragePercentage: coveragePercentage,
-        questionsAnalyzed: questionsMetadata,
-        note: `Analyzed ${answeredQuestions}/${totalQuestions} scenarios. Skipped ${skippedQuestions} scenarios.`
-      } : {
-        analysisPath: "direct",
-        requirementDetail: `${requirementText.split(/\s+/).length} words analyzed`,
-        note: "No questions provided - analyzing full requirement text as-is",
-        warning: "More detailed requirement text = better analysis accuracy"
+
+        ...(analysispath === "guided" && {
+          answeredQuestions: answeredCount,
+          skippedQuestions: totalQuestions - answeredCount,
+          coveragePercentage: coveragePercentage,
+          questionsAnalyzed: answeredQuestions,
+          note: `Pure facts: ${answeredCount}/${totalQuestions} scenarios analyzed`
+        }),
+
+        ...(analysispath === "hybrid" && {
+          answeredQuestions: answeredCount,
+          inferredQuestions: inferredQuestions.length,
+          skippedQuestions: totalQuestions - answeredCount - inferredQuestions.length,
+          coveragePercentage: coveragePercentage,
+          factsContribution: Math.round((answeredCount / totalQuestions) * 100),
+          inferenceContribution: Math.round((inferredQuestions.length / totalQuestions) * 100),
+          questionsAnalyzed: answeredQuestions,
+          questionsInferred: inferredQuestions.map(q => ({
+            questionNumber: q.questionNumber,
+            description: q.question,
+            keywords: "Multiple matches detected in requirement text"
+          })),
+          note: `Hybrid: ${answeredCount} facts + ${inferredQuestions.length} inferred = ${totalAnalyzed}/${totalQuestions} analyzed`
+        }),
+
+        ...(analysispath === "direct" && {
+          requirementDetail: `${requirementText.split(/\s+/).length} words analyzed`,
+          note: "No questions provided - analyzing full requirement text as-is",
+          warning: "More detailed requirement text = better analysis accuracy"
+        })
       }
     };
   } catch (error) {
