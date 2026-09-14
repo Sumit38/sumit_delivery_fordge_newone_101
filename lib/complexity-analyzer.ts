@@ -447,10 +447,25 @@ M = E - N + 2P = [number]`,
       console.log("⚠️ Reconstructing edges from paths (parsing failed or Claude didn't format edges)...");
       const uniqueEdges = new Map<string, { from: string; to: string; condition?: string }>();
 
-      pathsList.forEach((path) => {
-        for (let i = 0; i < path.length - 1; i++) {
-          const from = path[i].trim();
-          const to = path[i + 1].trim();
+      pathsList.forEach((pathItem) => {
+        // Handle both string paths (with →) and array paths
+        let nodes: string[] = [];
+
+        if (typeof pathItem === 'string') {
+          // Filter out title lines (start with ** or --)
+          if (pathItem.startsWith('**') || pathItem.startsWith('--') || pathItem.startsWith('##')) {
+            return; // Skip titles and separators
+          }
+          // Split by arrow notation
+          nodes = pathItem.split('→').map((node) => node.trim()).filter((node) => node.length > 0);
+        } else if (Array.isArray(pathItem)) {
+          nodes = pathItem as string[];
+        }
+
+        // Create edges from consecutive nodes
+        for (let i = 0; i < nodes.length - 1; i++) {
+          const from = nodes[i].trim();
+          const to = nodes[i + 1].trim();
           const edgeKey = `${from}|${to}`;
 
           if (!uniqueEdges.has(edgeKey) && from && to) {
