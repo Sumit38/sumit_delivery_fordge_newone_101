@@ -11,6 +11,26 @@ export interface QuestionMetadata {
   isAnswered: boolean; // false if skipped
 }
 
+export interface AnalyzedScenarios {
+  analysisPath: "guided" | "hybrid" | "direct";
+  totalQuestions?: number;
+  answeredQuestions?: number;
+  inferredQuestions?: number;
+  skippedQuestions?: number;
+  coveragePercentage?: number;
+  factsContribution?: number;
+  inferenceContribution?: number;
+  questionsAnalyzed?: QuestionMetadata[];
+  questionsInferred?: Array<{
+    questionNumber: number;
+    description: string;
+    keywords?: string;
+  }>;
+  requirementDetail?: string;
+  note?: string;
+  warning?: string;
+}
+
 export interface ComplexityAnalysis {
   nodes: string[];
   edges: Array<{ from: string; to: string; condition?: string }>;
@@ -24,15 +44,9 @@ export interface ComplexityAnalysis {
   decisionPoints: string[];
   alternativePaths: number;
   reasoning?: string;
-  confidenceScore?: number; // (Answered Questions / 15) × 100 - NO BIAS
+  confidenceScore?: number;
   confidenceReason?: string;
-  analyzedScenarios?: {
-    totalQuestions: number;
-    answeredQuestions: number;
-    skippedQuestions: number;
-    coveragePercentage: number;
-    questionsAnalyzed: QuestionMetadata[];
-  };
+  analyzedScenarios?: AnalyzedScenarios;
 }
 
 // Inference rules: Map keywords to likely question numbers
