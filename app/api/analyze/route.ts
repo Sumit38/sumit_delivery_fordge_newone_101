@@ -221,6 +221,7 @@ export async function POST(request: NextRequest) {
       reasoning: correctedReasoning,
       confidenceScore: analysis.confidenceScore || 75,
       confidenceReason: analysis.confidenceReason || "Analysis complete",
+      analyzedScenarios: analysis.analyzedScenarios || undefined,
     };
 
     console.log("🔍 [5/5] Saving to database...");

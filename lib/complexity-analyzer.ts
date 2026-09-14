@@ -114,7 +114,7 @@ export async function analyzeRequirementComplexity(
 
     // HYBRID APPROACH: Infer unanswered questions from requirement text
     let inferredQuestions: QuestionMetadata[] = [];
-    let analysispath = "direct";
+    let analysispath: "guided" | "hybrid" | "direct" = "direct";
 
     if (answeredCount > 0 && answeredCount < 8) {
       // HYBRID PATH: User answered some but not all
