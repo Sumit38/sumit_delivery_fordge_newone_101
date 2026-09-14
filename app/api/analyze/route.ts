@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let { requirementText, title } = body;
+    let { requirementText, title, questionsMetadata } = body;
 
     if (!requirementText || typeof requirementText !== "string") {
       console.error("❌ [2/5] Missing or invalid requirementText");
@@ -75,6 +75,12 @@ export async function POST(request: NextRequest) {
         { error: "Requirement text is required" },
         { status: 400 }
       );
+    }
+
+    // Validate questionsMetadata if provided
+    if (questionsMetadata && !Array.isArray(questionsMetadata)) {
+      console.warn("⚠️ [2/5] questionsMetadata provided but invalid format, proceeding without it");
+      questionsMetadata = undefined;
     }
 
     // Sanitize text: remove null characters and other problematic Unicode
@@ -134,7 +140,7 @@ export async function POST(request: NextRequest) {
     // ✅ STEP 4: Claude API Analysis
     let analysis;
     try {
-      analysis = await analyzeRequirementComplexity(requirementText);
+      analysis = await analyzeRequirementComplexity(requirementText, questionsMetadata);
       console.log("✅ [4/5] Complexity analysis successful");
     } catch (analysisError) {
       console.error("⚠️ [4/5] Claude API error, using fallback:", analysisError);
@@ -346,6 +352,8 @@ export async function POST(request: NextRequest) {
         reasoning: sanitizedAnalysis.reasoning,
         confidenceScore: sanitizedAnalysis.confidenceScore,
         confidenceReason: sanitizedAnalysis.confidenceReason,
+        // FACTS-BASED: Show analyzed vs skipped questions (NO BIAS - just coverage)
+        analyzedScenarios: sanitizedAnalysis.analyzedScenarios,
       },
     };
 

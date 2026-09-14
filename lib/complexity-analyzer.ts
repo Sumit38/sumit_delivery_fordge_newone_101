@@ -4,6 +4,13 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
+export interface QuestionMetadata {
+  questionNumber: number;
+  question: string;
+  answer: string;
+  isAnswered: boolean; // false if skipped
+}
+
 export interface ComplexityAnalysis {
   nodes: string[];
   edges: Array<{ from: string; to: string; condition?: string }>;
@@ -16,16 +23,37 @@ export interface ComplexityAnalysis {
   analysis: string;
   decisionPoints: string[];
   alternativePaths: number;
-  reasoning?: string; // Detailed step-by-step reasoning from Claude
-  confidenceScore?: number; // 0-100 confidence in the analysis
-  confidenceReason?: string; // Why we're confident or not
+  reasoning?: string;
+  confidenceScore?: number; // (Answered Questions / 15) × 100 - NO BIAS
+  confidenceReason?: string;
+  analyzedScenarios?: {
+    totalQuestions: number;
+    answeredQuestions: number;
+    skippedQuestions: number;
+    coveragePercentage: number;
+    questionsAnalyzed: QuestionMetadata[];
+  };
 }
 
 export async function analyzeRequirementComplexity(
-  requirementText: string
+  requirementText: string,
+  questionsMetadata?: QuestionMetadata[]
 ): Promise<ComplexityAnalysis> {
   try {
     console.log("🔍 Analyzing requirement with cyclomatic complexity formula...");
+
+    // Calculate question coverage (FACTS-BASED, NO BIAS)
+    const totalQuestions = 15;
+    const answeredQuestions = questionsMetadata?.filter(q => q.isAnswered).length || 0;
+    const skippedQuestions = totalQuestions - answeredQuestions;
+    const coveragePercentage = Math.round((answeredQuestions / totalQuestions) * 100);
+
+    console.log(`📊 Question Coverage: ${answeredQuestions}/${totalQuestions} answered (${coveragePercentage}%)`);
+    if (questionsMetadata && questionsMetadata.length > 0) {
+      questionsMetadata.forEach(q => {
+        console.log(`   Q${q.questionNumber}: ${q.isAnswered ? '✓ ANALYZED' : '⊘ SKIPPED'} - "${q.question}"`);
+      });
+    }
 
     const response = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
@@ -38,6 +66,24 @@ export async function analyzeRequirementComplexity(
 
 REQUIREMENT:
 ${requirementText}
+
+${questionsMetadata && questionsMetadata.length > 0 ? `
+ANALYZED SCENARIOS (Questions Answered):
+${questionsMetadata
+  .filter(q => q.isAnswered)
+  .map(q => `- Q${q.questionNumber}: ${q.question}\n  Answer: ${q.answer}`)
+  .join('\n')}
+
+SKIPPED SCENARIOS (Questions Not Answered - DO NOT EXTRACT PATHS FOR THESE):
+${questionsMetadata
+  .filter(q => !q.isAnswered)
+  .map(q => `- Q${q.questionNumber}: ${q.question}`)
+  .join('\n')}
+
+CRITICAL INSTRUCTION: Extract nodes, edges, and paths ONLY for the analyzed scenarios above.
+Do NOT guess or hallucinate paths for skipped questions. The complexity must reflect only
+the analyzed scenarios, not theoretical or unspecified functionality.
+` : ''}
 
 STEP-BY-STEP INSTRUCTIONS:
 
@@ -203,13 +249,13 @@ M = E - N + 2P = [number]`,
       return createFallbackAnalysis();
     }
 
-    // CRITICAL: Check if extracted data matches stated counts
-    if (nodesList.length < n * 0.8 || edgesList.length < e * 0.8 || pathsList.length < p * 0.8) {
-      console.error(`⚠️ WARNING: Extracted data significantly less than stated counts!`);
-      console.error(`   Nodes: extracted ${nodesList.length} vs stated ${n} (${((nodesList.length/n)*100).toFixed(0)}%)`);
-      console.error(`   Edges: extracted ${edgesList.length} vs stated ${e} (${((edgesList.length/e)*100).toFixed(0)}%)`);
-      console.error(`   Paths: extracted ${pathsList.length} vs stated ${p} (${((pathsList.length/p)*100).toFixed(0)}%)`);
-      console.error(`   This suggests parsing or analysis issues!`);
+    // CRITICAL: Check if extracted data matches stated counts (99% minimum required)
+    if (nodesList.length < n * 0.99 || edgesList.length < e * 0.99 || pathsList.length < p * 0.99) {
+      console.error(`❌ CRITICAL: Extracted data INCOMPLETE (99% minimum required)!`);
+      console.error(`   Nodes: extracted ${nodesList.length} vs stated ${n} (${((nodesList.length/n)*100).toFixed(1)}%) ${nodesList.length < n * 0.99 ? '❌ FAIL' : '✓'}`);
+      console.error(`   Edges: extracted ${edgesList.length} vs stated ${e} (${((edgesList.length/e)*100).toFixed(1)}%) ${edgesList.length < e * 0.99 ? '❌ FAIL' : '✓'}`);
+      console.error(`   Paths: extracted ${pathsList.length} vs stated ${p} (${((pathsList.length/p)*100).toFixed(1)}%) ${pathsList.length < p * 0.99 ? '❌ FAIL' : '✓'}`);
+      console.error(`   Analysis is INCOMPLETE - Claude must extract ALL nodes/edges/paths!`);
     }
 
     // Validate M calculation: should be M = E - N + 2P
@@ -236,12 +282,14 @@ M = E - N + 2P = [number]`,
       reasoning = reasoningMatch[1].trim();
     }
 
-    // Calculate confidence score using DECISION MAKING GRAPH (Q&A validation)
-    const confidenceData = calculateConfidenceScoreUsingDecisionGraph(
-      n, e, p,
-      nodesList, edgesList, pathsList,
-      reasoning, fullText
-    );
+    // FACTS-BASED CONFIDENCE: No bias, based purely on question coverage
+    // Confidence = (Answered Questions / 15) × 100
+    // This reflects HOW MUCH of the requirement was analyzed, not QUALITY of answers
+    const factsBasedConfidence = coveragePercentage;
+    const confidenceData = {
+      score: factsBasedConfidence,
+      reason: `${answeredQuestions}/15 scenarios analyzed (${coveragePercentage}% coverage) - NO QUALITY JUDGMENT, FACTS-BASED`
+    };
 
     console.log("\n🧮 FORMULA CALCULATION (McCabe Cyclomatic Complexity):");
     console.log(`   N (Nodes) = ${n}`);
@@ -297,6 +345,14 @@ M = E - N + 2P = [number]`,
       reasoning: reasoning,
       confidenceScore: confidenceData.score,
       confidenceReason: confidenceData.reason,
+      // FACTS-BASED: Show what was analyzed vs skipped (NO BIAS)
+      analyzedScenarios: questionsMetadata && questionsMetadata.length > 0 ? {
+        totalQuestions: totalQuestions,
+        answeredQuestions: answeredQuestions,
+        skippedQuestions: skippedQuestions,
+        coveragePercentage: coveragePercentage,
+        questionsAnalyzed: questionsMetadata
+      } : undefined
     };
   } catch (error) {
     console.error("❌ Error in complexity analysis:", error);
@@ -323,54 +379,54 @@ function calculateConfidenceScoreUsingDecisionGraph(
 
   // QUESTION 1: "How many nodes identified?"
   // Decision Graph: Are ALL nodes extracted and listed?
-  // CRITICAL: If N=29, must extract ALL 29 nodes (not just some)
-  const nodesMatch = nodes.length >= n * 0.95; // Allow 5% rounding
+  // CRITICAL: If N=29, must extract ALL 29 nodes (not just some) - 99% minimum
+  const nodesMatch = nodes.length >= n * 0.99; // Allow only 1% rounding for very large graphs
   const q1Clear = n > 0 && n <= 100 && nodesMatch;
   validationResults.push({
     question: "Nodes identified (N)",
     isClear: q1Clear,
     reason: q1Clear
-      ? `✓ Clear: ${nodes.length}/${n} nodes extracted (COMPLETE)`
-      : `❌ CRITICAL: ${nodes.length}/${n} nodes extracted (INCOMPLETE - missing ${n - nodes.length})`,
+      ? `✓ Clear: ${nodes.length}/${n} nodes extracted (${((nodes.length/n)*100).toFixed(1)}% - COMPLETE)`
+      : `❌ CRITICAL: ${nodes.length}/${n} nodes extracted (${((nodes.length/n)*100).toFixed(1)}% - INCOMPLETE, need ${Math.ceil(n * 0.99)} minimum)`,
   });
 
   // QUESTION 2: "What are the edges identified?"
   // Decision Graph: Are edges extracted? Do they MATCH stated count exactly?
-  // CRITICAL: ALL edges must be extracted, not just 80%
-  const edgesMatch = edges.length === e || edges.length >= e * 0.95; // Allow small rounding difference
+  // CRITICAL: ALL edges must be extracted - 99% minimum
+  const edgesMatch = edges.length >= e * 0.99; // Allow only 1% rounding
   const q2Clear = edges.length > 0 && edgesMatch;
   validationResults.push({
     question: "Edges identified (E)",
     isClear: q2Clear,
     reason: q2Clear
-      ? `✓ Clear: ${edges.length}/${e} edges extracted (COMPLETE)`
-      : `❌ CRITICAL: ${edges.length}/${e} edges extracted (INCOMPLETE - missing ${e - edges.length})`,
+      ? `✓ Clear: ${edges.length}/${e} edges extracted (${((edges.length/e)*100).toFixed(1)}% - COMPLETE)`
+      : `❌ CRITICAL: ${edges.length}/${e} edges extracted (${((edges.length/e)*100).toFixed(1)}% - INCOMPLETE, need ${Math.ceil(e * 0.99)} minimum)`,
   });
 
   // QUESTION 3: "What are the distinct paths?"
   // Decision Graph: Are ALL paths extracted and listed?
-  // CRITICAL: If P=20, must extract ALL 20 paths (not just some)
-  const pathsMatch = paths.length >= p * 0.95; // Allow 5% rounding
+  // CRITICAL: If P=20, must extract ALL 20 paths (not just some) - 99% minimum
+  const pathsMatch = paths.length >= p * 0.99; // Allow only 1% rounding
   const q3Clear = paths.length > 0 && pathsMatch;
   validationResults.push({
     question: "Distinct paths (P)",
     isClear: q3Clear,
     reason: q3Clear
-      ? `✓ Clear: ${paths.length}/${p} paths traced (COMPLETE)`
-      : `❌ CRITICAL: ${paths.length}/${p} paths traced (INCOMPLETE - missing ${p - paths.length})`,
+      ? `✓ Clear: ${paths.length}/${p} paths traced (${((paths.length/p)*100).toFixed(1)}% - COMPLETE)`
+      : `❌ CRITICAL: ${paths.length}/${p} paths traced (${((paths.length/p)*100).toFixed(1)}% - INCOMPLETE, need ${Math.ceil(p * 0.99)} minimum)`,
   });
 
   // QUESTION 4: "Are N, E, P values consistent?"
-  // Decision Graph: Do EXTRACTED counts MATCH STATED values? Must be COMPLETE!
+  // Decision Graph: Do EXTRACTED counts MATCH STATED values? Must be COMPLETE! - 99% minimum
   const graphValid = e >= n - 1; // Connected graph check
-  const countsCompleteMatch = nodes.length >= n * 0.95 && edges.length >= e * 0.95 && paths.length >= p * 0.95;
+  const countsCompleteMatch = nodes.length >= n * 0.99 && edges.length >= e * 0.99 && paths.length >= p * 0.99;
   const q4Clear = graphValid && countsCompleteMatch;
   validationResults.push({
     question: "Graph structure validity",
     isClear: q4Clear,
     reason: q4Clear
-      ? `✓ Clear: VALID & COMPLETE (N:${nodes.length}/${n}, E:${edges.length}/${e}, P:${paths.length}/${p})`
-      : `❌ CRITICAL: Incomplete extraction (N:${nodes.length}/${n}, E:${edges.length}/${e}, P:${paths.length}/${p})`,
+      ? `✓ Clear: VALID & COMPLETE (N:${nodes.length}/${n} ${((nodes.length/n)*100).toFixed(1)}%, E:${edges.length}/${e} ${((edges.length/e)*100).toFixed(1)}%, P:${paths.length}/${p} ${((paths.length/p)*100).toFixed(1)}%)`
+      : `❌ CRITICAL: Incomplete extraction (N:${nodes.length}/${n}, E:${edges.length}/${e}, P:${paths.length}/${p}) - need 99% minimum for each`,
   });
 
   // QUESTION 5: "What is the detailed reasoning?"
