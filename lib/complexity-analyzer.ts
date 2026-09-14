@@ -282,14 +282,48 @@ M = E - N + 2P = [number]`,
       reasoning = reasoningMatch[1].trim();
     }
 
-    // FACTS-BASED CONFIDENCE: No bias, based purely on question coverage
-    // Confidence = (Answered Questions / 15) × 100
-    // This reflects HOW MUCH of the requirement was analyzed, not QUALITY of answers
-    const factsBasedConfidence = coveragePercentage;
-    const confidenceData = {
-      score: factsBasedConfidence,
-      reason: `${answeredQuestions}/15 scenarios analyzed (${coveragePercentage}% coverage) - NO QUALITY JUDGMENT, FACTS-BASED`
-    };
+    // DUAL-PATH CONFIDENCE SYSTEM (NO BIAS, FACTS-BASED)
+    let confidenceData: { score: number; reason: string; analysispath?: string };
+
+    if (questionsMetadata && questionsMetadata.length > 0 && answeredQuestions > 0) {
+      // PATH 1: GUIDED ANALYSIS (User answered some questions)
+      // Confidence = (Answered Questions / 15) × 100
+      const factsBasedConfidence = coveragePercentage;
+      confidenceData = {
+        score: factsBasedConfidence,
+        reason: `${answeredQuestions}/15 scenarios analyzed (${coveragePercentage}% coverage) - GUIDED PATH`,
+        analysispath: "guided"
+      };
+      console.log(`\n📊 PATH 1 (GUIDED): ${answeredQuestions}/15 questions answered`);
+    } else {
+      // PATH 2: DIRECT ANALYSIS (User skipped questions, analyzing raw requirement)
+      // Confidence based on requirement text detail level (0-100)
+      const requirementLength = requirementText.length;
+      const wordCount = requirementText.split(/\s+/).length;
+
+      // Heuristic: longer, more detailed requirements = higher confidence
+      let detailConfidence = Math.min(100, Math.round((wordCount / 300) * 100));
+
+      // Check for key complexity indicators
+      const complexityIndicators = [
+        'if', 'else', 'error', 'retry', 'validation', 'approval', 'reject',
+        'condition', 'decision', 'branch', 'parallel', 'concurrent', 'sync',
+        'offline', 'cache', 'queue', 'workflow', 'permission', 'role'
+      ];
+      const indicatorCount = complexityIndicators.filter(indicator =>
+        requirementText.toLowerCase().includes(indicator)
+      ).length;
+
+      // Boost confidence if complexity indicators found
+      detailConfidence = Math.min(100, Math.round(detailConfidence + (indicatorCount * 3)));
+
+      confidenceData = {
+        score: detailConfidence,
+        reason: `Direct analysis of ${wordCount} words with ${indicatorCount} complexity indicators - DIRECT PATH`,
+        analysispath: "direct"
+      };
+      console.log(`\n📊 PATH 2 (DIRECT): ${wordCount} words, ${indicatorCount} complexity indicators detected`);
+    }
 
     console.log("\n🧮 FORMULA CALCULATION (McCabe Cyclomatic Complexity):");
     console.log(`   N (Nodes) = ${n}`);
@@ -345,14 +379,21 @@ M = E - N + 2P = [number]`,
       reasoning: reasoning,
       confidenceScore: confidenceData.score,
       confidenceReason: confidenceData.reason,
-      // FACTS-BASED: Show what was analyzed vs skipped (NO BIAS)
+      // DUAL-PATH METRICS: Show which analysis path was used
       analyzedScenarios: questionsMetadata && questionsMetadata.length > 0 ? {
+        analysisPath: "guided",
         totalQuestions: totalQuestions,
         answeredQuestions: answeredQuestions,
         skippedQuestions: skippedQuestions,
         coveragePercentage: coveragePercentage,
-        questionsAnalyzed: questionsMetadata
-      } : undefined
+        questionsAnalyzed: questionsMetadata,
+        note: `Analyzed ${answeredQuestions}/${totalQuestions} scenarios. Skipped ${skippedQuestions} scenarios.`
+      } : {
+        analysisPath: "direct",
+        requirementDetail: `${requirementText.split(/\s+/).length} words analyzed`,
+        note: "No questions provided - analyzing full requirement text as-is",
+        warning: "More detailed requirement text = better analysis accuracy"
+      }
     };
   } catch (error) {
     console.error("❌ Error in complexity analysis:", error);

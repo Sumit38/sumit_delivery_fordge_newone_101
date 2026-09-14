@@ -352,8 +352,12 @@ export async function POST(request: NextRequest) {
         reasoning: sanitizedAnalysis.reasoning,
         confidenceScore: sanitizedAnalysis.confidenceScore,
         confidenceReason: sanitizedAnalysis.confidenceReason,
-        // FACTS-BASED: Show analyzed vs skipped questions (NO BIAS - just coverage)
+        // DUAL-PATH SYSTEM: Show which analysis path was used
+        analysispath: sanitizedAnalysis.analyzedScenarios?.analysisPath || "direct",
         analyzedScenarios: sanitizedAnalysis.analyzedScenarios,
+        analysisMethod: sanitizedAnalysis.analyzedScenarios?.analysisPath === "guided"
+          ? "Guided Analysis: Extracted only answered scenarios (Path 1)"
+          : "Direct Analysis: Analyzed full requirement text (Path 2)",
       },
     };
 
