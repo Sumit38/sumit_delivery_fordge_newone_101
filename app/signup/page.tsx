@@ -227,6 +227,7 @@ export default function SignupPage() {
               <option value="Test Analyst">Test Analyst</option>
               <option value="Test Manager">Test Manager</option>
               <option value="QA Lead">QA Lead</option>
+              <option value="Consultant">Consultant</option>
             </select>
           </div>
 
