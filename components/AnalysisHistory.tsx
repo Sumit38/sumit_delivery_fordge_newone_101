@@ -18,6 +18,19 @@ interface Analysis {
   requirementText?: string;
   qaManDays?: number;
   devManDays?: number;
+  estimationData?: {
+    baseEffort: number;
+    totalEffort: number;
+    timeline: number;
+    teamSize: number;
+    costPerHour?: number;
+    totalBudget?: number;
+    riskLevel: string;
+    skillLevel: string;
+    techFamiliarity: string;
+    testingLevel: string;
+    confidence: number;
+  };
 }
 
 interface AnalysisHistoryProps {
@@ -33,6 +46,19 @@ interface AnalysisHistoryProps {
     edgesCount?: number;
     paths?: number;
     testScenarios?: number;
+    estimationData?: {
+      baseEffort: number;
+      totalEffort: number;
+      timeline: number;
+      teamSize: number;
+      costPerHour?: number;
+      totalBudget?: number;
+      riskLevel: string;
+      skillLevel: string;
+      techFamiliarity: string;
+      testingLevel: string;
+      confidence: number;
+    };
   }) => void;
   onAnalysisDelete?: (deletedId: string) => void;
 }
@@ -277,6 +303,7 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
                       edgesCount: analysis.edgesCount,
                       paths: analysis.paths,
                       testScenarios: analysis.testScenarios,
+                      estimationData: analysis.estimationData,
                     });
                   }
                 }}
@@ -431,7 +458,28 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
                       </p>
                     </div>
 
-                    {/* Section 3: Scenario Bifurcation by Complexity Level */}
+                    {/* Section 3: Timeline Estimation */}
+                    {selectedAnalysis.estimationData && (
+                      <div className="p-4 bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg border border-purple-200">
+                        <p className="text-xs text-slate-600 mb-1">⏱️ Estimated Timeline</p>
+                        <div className="text-3xl font-bold text-purple-600">
+                          {selectedAnalysis.estimationData.timeline} weeks
+                        </div>
+                        <p className="text-xs text-slate-600 mt-2">
+                          {Math.ceil(selectedAnalysis.estimationData.timeline * 5)} calendar days
+                        </p>
+                        <p className="text-xs text-slate-600 mt-2">
+                          <strong>Team Size:</strong> {selectedAnalysis.estimationData.teamSize || 3} developers
+                        </p>
+                        {selectedAnalysis.estimationData.riskLevel && (
+                          <p className="text-xs text-slate-600 mt-1">
+                            <strong>Risk Level:</strong> {selectedAnalysis.estimationData.riskLevel}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Section 4: Scenario Bifurcation by Complexity Level */}
                     {(() => {
                       const distribution = calculateComplexityDistribution();
                       return (

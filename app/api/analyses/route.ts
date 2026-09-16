@@ -73,12 +73,36 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Get estimations for all requirements
+    const { data: estimations, error: estError } = await supabaseServer
+      .from("estimations")
+      .select("*")
+      .eq("user_id", userId);
+
+    if (estError) {
+      console.error("Error fetching estimations:", estError);
+      // Continue without estimations data
+    }
+
+    // Create a map of requirement_id -> latest estimation
+    const estimationMap = new Map();
+    if (estimations) {
+      estimations.forEach((est: any) => {
+        const key = est.requirement_id;
+        if (!estimationMap.has(key) || new Date(est.created_at) > new Date(estimationMap.get(key).created_at)) {
+          estimationMap.set(key, est);
+        }
+      });
+    }
+
     // Transform data for frontend
     const analyses = requirements
       .filter((req: any) => req.complexity_results.length > 0)
       .map((req: any) => {
         const result = req.complexity_results[0];
         const analysisData = result.analysis_data || {};
+        const estimation = estimationMap.get(req.id);
+
         return {
           id: req.id,
           analysisResultId: result.id,
@@ -90,6 +114,19 @@ export async function GET(request: NextRequest) {
           paths: analysisData.alternativePaths || 1,
           createdAt: req.created_at,
           requirementText: req.document_text || "",
+          estimationData: estimation ? {
+            baseEffort: estimation.base_effort || 0,
+            totalEffort: estimation.total_effort || 0,
+            timeline: estimation.timeline_weeks || 0,
+            teamSize: estimation.team_size || 3,
+            costPerHour: estimation.cost_per_hour,
+            totalBudget: estimation.total_budget,
+            riskLevel: estimation.risk_level,
+            skillLevel: estimation.skill_level,
+            techFamiliarity: estimation.tech_familiarity,
+            testingLevel: estimation.testing_level,
+            confidence: estimation.confidence_score,
+          } : undefined,
         };
       });
 

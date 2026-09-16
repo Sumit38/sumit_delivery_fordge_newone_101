@@ -1,66 +1,49 @@
-const { createClient } = require("@supabase/supabase-js");
+const { createClient } = require('@supabase/supabase-js');
 
-const supabaseUrl = "https://xfzjtnhblkcfdpjfvpsk.supabase.co";
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseUrl = 'https://xjfbbanwjvjruoyofkek.supabase.co';
+const serviceRoleKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhqZmJiYW53anZqcnVveW9ma2VrIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NTkxNzY0NCwiZXhwIjoyMTAxNDkzNjQ0fQ.AAjnNoOIjTzSZugyFK0JgsxfLzLfzTEDLqjBl4QMHcg';
 
-if (!supabaseServiceKey) {
-  console.error("❌ SUPABASE_SERVICE_ROLE_KEY not set in environment");
-  process.exit(1);
-}
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const supabase = createClient(supabaseUrl, serviceRoleKey);
 
 async function createTestUser() {
   try {
-    console.log("🔍 Creating test user with auto-confirmed email...");
-
     // Create auth user
-    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-      email: "demo@test.com",
-      password: "Demo@12345",
+    const { data: { user }, error: authError } = await supabase.auth.admin.createUser({
+      email: 'test@deliveryforge.local',
+      password: 'TestPass123!',
       email_confirm: true,
-      user_metadata: {
-        test_user: true,
-      },
     });
 
     if (authError) {
-      console.error("❌ Auth error:", authError);
-      throw authError;
+      console.error('Auth error:', authError);
+      return;
     }
 
-    console.log("✅ Auth user created:", authData.user.id);
+    console.log('✓ User created:', user.id, user.email);
 
     // Create user profile
-    const { data: profileData, error: profileError } = await supabase
-      .from("users")
+    const { error: profileError } = await supabase
+      .from('users')
       .insert({
-        id: authData.user.id,
-        clerk_id: authData.user.id,
-        email: "demo@test.com",
-        mobile: "+1-234-567-8900",
-        organization: "Demo Company",
-        role: "Tester",
-      })
-      .select()
-      .single();
+        id: user.id,
+        clerk_id: user.id,
+        email: user.email,
+        mobile: '+12025551234',
+        organization: 'Test Company',
+        role: 'Tester',
+      });
 
     if (profileError) {
-      console.error("❌ Profile error:", profileError);
-      throw profileError;
+      console.error('Profile error:', profileError);
+      return;
     }
 
-    console.log("✅ User profile created");
-    console.log("\n🎉 TEST USER CREATED SUCCESSFULLY!\n");
-    console.log("📧 Email: demo@test.com");
-    console.log("🔐 Password: Demo@12345");
-    console.log("👤 Organization: Demo Company");
-    console.log("💼 Role: Tester");
-    console.log("🆔 User ID:", authData.user.id);
-
-  } catch (error) {
-    console.error("❌ Error creating test user:", error);
-    process.exit(1);
+    console.log('✓ Profile created');
+    console.log('\nTest credentials:');
+    console.log('Email:', user.email);
+    console.log('Password: TestPass123!');
+  } catch (err) {
+    console.error('Error:', err);
   }
 }
 

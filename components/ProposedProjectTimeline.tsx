@@ -8,6 +8,11 @@ interface TimelineProps {
   devManDays: number;
   complexityScore: number;
   analysisId?: string;
+  estimationData?: {
+    totalEffort: number;
+    timeline: number;
+    teamSize: number;
+  };
 }
 
 export default function ProposedProjectTimeline({
@@ -15,62 +20,102 @@ export default function ProposedProjectTimeline({
   devManDays,
   complexityScore,
   analysisId,
+  estimationData,
 }: TimelineProps) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const timeline = useMemo(() => {
-    // Phase breakdown in percentage of dev days
-    const designDays = devManDays * 0.15; // 15%
-    const developmentDays = devManDays * 0.60; // 60%
-    const testingDays = qaManDays; // All QA days
-    const deploymentDays = 3; // Fixed 3 days
-    const supportDays = 7; // Fixed 7 days (1 week)
-    const bufferDays = (devManDays + qaManDays + deploymentDays + supportDays) * 0.05; // 5% buffer
 
-    const totalDays =
-      designDays +
-      developmentDays +
-      testingDays +
-      deploymentDays +
-      supportDays +
-      bufferDays;
+  // Use detailed estimation if available, otherwise use basic metrics
+  const effectiveDevManDays = estimationData ? (estimationData.totalEffort / 8) * 0.7 : devManDays; // 70% for dev
+  const effectiveQaManDays = estimationData ? (estimationData.totalEffort / 8) * 0.3 : qaManDays; // 30% for QA
+
+  // Get team size for parallel work calculation
+  const teamSize = estimationData?.teamSize || 3; // Default to 3 if not specified
+  const parallelizationFactor = 0.85; // 85% efficiency due to communication overhead
+
+  const timeline = useMemo(() => {
+    // Use estimationData.timeline if available (source of truth with deadlineFactor applied)
+    let totalDays: number;
+
+    if (estimationData?.timeline) {
+      // Convert weeks to calendar days
+      totalDays = Math.ceil(estimationData.timeline * 5);
+    } else {
+      // Fallback: Calculate from phases if no estimation data
+      const designManDays = effectiveDevManDays * 0.15;
+      const developmentManDays = effectiveDevManDays * 0.60;
+      const testingManDays = effectiveQaManDays;
+      const deploymentDays = 3;
+      const supportDays = 7;
+
+      const designCalendarDays = Math.ceil((designManDays / teamSize) / parallelizationFactor);
+      const developmentCalendarDays = Math.ceil((developmentManDays / teamSize) / parallelizationFactor);
+      const testingCalendarDays = Math.ceil((testingManDays / Math.max(teamSize * 0.3, 1)) / parallelizationFactor);
+      const bufferDays = Math.ceil((designCalendarDays + developmentCalendarDays + testingCalendarDays) * 0.05);
+
+      totalDays = designCalendarDays + developmentCalendarDays + testingCalendarDays + deploymentDays + supportDays + bufferDays;
+    }
+
+    // Distribute totalDays across phases proportionally for Gantt visualization
+    const designManDays = effectiveDevManDays * 0.15;
+    const developmentManDays = effectiveDevManDays * 0.60;
+    const testingManDays = effectiveQaManDays;
+    const deploymentDays = 3;
+    const supportDays = 7;
+
+    const designCalendarDays = Math.ceil((designManDays / teamSize) / parallelizationFactor);
+    const developmentCalendarDays = Math.ceil((developmentManDays / teamSize) / parallelizationFactor);
+    const testingCalendarDays = Math.ceil((testingManDays / Math.max(teamSize * 0.3, 1)) / parallelizationFactor);
+    const bufferDays = Math.ceil((designCalendarDays + developmentCalendarDays + testingCalendarDays) * 0.05);
+
+    // Calculate scaling factor if using estimationData timeline
+    const calculatedDays = designCalendarDays + developmentCalendarDays + testingCalendarDays + deploymentDays + supportDays + bufferDays;
+    const scaleFactor = estimationData?.timeline ? totalDays / calculatedDays : 1;
+
+    // Scale phase days to match total from estimationData
+    const scaledDesignDays = Math.ceil(designCalendarDays * scaleFactor);
+    const scaledDevDays = Math.ceil(developmentCalendarDays * scaleFactor);
+    const scaledTestDays = Math.ceil(testingCalendarDays * scaleFactor);
+    const scaledDeployDays = Math.ceil(deploymentDays * scaleFactor);
+    const scaledSupportDays = Math.ceil(supportDays * scaleFactor);
+    const scaledBufferDays = Math.ceil(bufferDays * scaleFactor);
 
     const phases = [
       {
         name: "Design & Planning",
-        days: designDays,
+        days: scaledDesignDays,
         color: "bg-blue-500",
-        percentage: (designDays / totalDays) * 100,
+        percentage: (scaledDesignDays / totalDays) * 100,
       },
       {
         name: "Development",
-        days: developmentDays,
+        days: scaledDevDays,
         color: "bg-green-500",
-        percentage: (developmentDays / totalDays) * 100,
+        percentage: (scaledDevDays / totalDays) * 100,
       },
       {
         name: "QA & Testing",
-        days: testingDays,
+        days: scaledTestDays,
         color: "bg-yellow-500",
-        percentage: (testingDays / totalDays) * 100,
+        percentage: (scaledTestDays / totalDays) * 100,
       },
       {
         name: "Deployment",
-        days: deploymentDays,
+        days: scaledDeployDays,
         color: "bg-purple-500",
-        percentage: (deploymentDays / totalDays) * 100,
+        percentage: (scaledDeployDays / totalDays) * 100,
       },
       {
         name: "Support & Monitoring",
-        days: supportDays,
+        days: scaledSupportDays,
         color: "bg-orange-500",
-        percentage: (supportDays / totalDays) * 100,
+        percentage: (scaledSupportDays / totalDays) * 100,
       },
       {
         name: "Buffer (5%)",
-        days: bufferDays,
+        days: scaledBufferDays,
         color: "bg-slate-300",
-        percentage: (bufferDays / totalDays) * 100,
+        percentage: (scaledBufferDays / totalDays) * 100,
       },
     ];
 
@@ -78,10 +123,10 @@ export default function ProposedProjectTimeline({
       phases,
       totalDays,
       weeksTotal: Math.ceil(totalDays / 5),
-      devTeamDays: Math.ceil(devManDays),
-      qaTeamDays: Math.ceil(qaManDays),
+      devTeamDays: Math.ceil(effectiveDevManDays),
+      qaTeamDays: Math.ceil(effectiveQaManDays),
     };
-  }, [qaManDays, devManDays]);
+  }, [effectiveDevManDays, effectiveQaManDays, teamSize, estimationData?.timeline]);
 
   const getComplexityRecommendation = (score: number) => {
     if (score <= 5) return "Low complexity - streamlined process recommended";
@@ -155,14 +200,14 @@ export default function ProposedProjectTimeline({
           <p className="text-xs text-slate-600 mt-1">Weeks (@ 5 days/week)</p>
         </div>
         <div className="p-4 bg-slate-50 rounded-lg">
-          <p className="text-2xl font-bold text-slate-900">~{timeline.devTeamDays}</p>
-          <p className="text-xs text-slate-600 mt-1">Dev Man Days</p>
-          <p className="text-xs text-slate-500 mt-1">(2 developers)</p>
+          <p className="text-2xl font-bold text-slate-900">~{Math.ceil((effectiveDevManDays / teamSize) / parallelizationFactor)}</p>
+          <p className="text-xs text-slate-600 mt-1">Dev Calendar Days</p>
+          <p className="text-xs text-slate-500 mt-1">({teamSize} developers)</p>
         </div>
         <div className="p-4 bg-slate-50 rounded-lg">
-          <p className="text-2xl font-bold text-slate-900">~{timeline.qaTeamDays}</p>
-          <p className="text-xs text-slate-600 mt-1">QA Man Days</p>
-          <p className="text-xs text-slate-500 mt-1">(1 QA engineer)</p>
+          <p className="text-2xl font-bold text-slate-900">~{Math.ceil((effectiveQaManDays / Math.max(teamSize * 0.3, 1)) / parallelizationFactor)}</p>
+          <p className="text-xs text-slate-600 mt-1">QA Calendar Days</p>
+          <p className="text-xs text-slate-500 mt-1">({Math.max(Math.ceil(teamSize * 0.3), 1)} QA engineers)</p>
         </div>
       </div>
 
@@ -235,17 +280,19 @@ export default function ProposedProjectTimeline({
         <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
           <h4 className="font-semibold text-green-900 mb-2">Development Team</h4>
           <ul className="text-xs text-green-800 space-y-1">
-            <li>✓ 2 Senior Developers</li>
-            <li>✓ {devManDays.toFixed(1)} man days total</li>
-            <li>✓ ~{timeline.devTeamDays} calendar days</li>
+            <li>✓ {teamSize} Developers</li>
+            <li>✓ {effectiveDevManDays.toFixed(1)} man days total</li>
+            <li>✓ ~{Math.ceil((effectiveDevManDays / teamSize) / parallelizationFactor)} calendar days</li>
+            <li className="text-xs text-green-700 mt-2">Efficiency: {(parallelizationFactor * 100).toFixed(0)}% (with overhead)</li>
           </ul>
         </div>
         <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
           <h4 className="font-semibold text-yellow-900 mb-2">QA Team</h4>
           <ul className="text-xs text-yellow-800 space-y-1">
-            <li>✓ 1 QA Engineer</li>
-            <li>✓ {qaManDays.toFixed(1)} man days total</li>
-            <li>✓ ~{timeline.qaTeamDays} calendar days</li>
+            <li>✓ {Math.max(Math.ceil(teamSize * 0.3), 1)} QA Engineer{Math.max(Math.ceil(teamSize * 0.3), 1) > 1 ? 's' : ''}</li>
+            <li>✓ {effectiveQaManDays.toFixed(1)} man days total</li>
+            <li>✓ ~{Math.ceil((effectiveQaManDays / Math.max(teamSize * 0.3, 1)) / parallelizationFactor)} calendar days</li>
+            <li className="text-xs text-yellow-700 mt-2">({(teamSize * 0.3 * 100).toFixed(0)}% of dev team)</li>
           </ul>
         </div>
       </div>

@@ -41,6 +41,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       preferences: data?.preferences || {
         timeline_enabled: false,
+        pitch_deck_enabled: false,
       },
     });
   } catch (error) {
@@ -76,12 +77,36 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { preferences } = body;
+
+    // Get existing preferences first
+    const { data: existingData } = await supabaseServer
+      .from("users")
+      .select("preferences")
+      .eq("id", userId)
+      .single();
+
+    const existingPreferences = existingData?.preferences || {
+      timeline_enabled: false,
+      pitch_deck_enabled: false,
+    };
+
+    // Check if body has 'preferences' object or individual fields
+    let updatedPreferences: any;
+
+    if (body.preferences) {
+      // If preferences object is provided, use it
+      updatedPreferences = { ...existingPreferences, ...body.preferences };
+    } else {
+      // Otherwise, merge individual fields
+      updatedPreferences = { ...existingPreferences, ...body };
+    }
+
+    console.log("Updating preferences:", updatedPreferences);
 
     // Update user preferences
     const { data, error } = await supabaseServer
       .from("users")
-      .update({ preferences })
+      .update({ preferences: updatedPreferences })
       .eq("id", userId)
       .select()
       .single();
@@ -96,7 +121,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      preferences: data?.preferences || {},
+      preferences: data?.preferences || updatedPreferences,
     });
   } catch (error) {
     console.error("Error updating preferences:", error);

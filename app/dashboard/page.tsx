@@ -13,6 +13,8 @@ import ProposedProjectTimeline from "@/components/ProposedProjectTimeline";
 import AboutPage from "@/components/AboutPage";
 import DownloadUseCaseButton from "@/components/DownloadUseCaseButton";
 import RequirementSelector from "@/components/RequirementSelector";
+import { EstimationTab } from "@/components/EstimationTab";
+import { PitchDeckTab } from "@/components/PitchDeckTab";
 
 interface LatestAnalysis {
   id?: string;
@@ -26,19 +28,34 @@ interface LatestAnalysis {
   edgesCount?: number;
   paths?: number;
   testScenarios?: number;
+  estimationData?: {
+    baseEffort: number;
+    totalEffort: number;
+    timeline: number;
+    teamSize: number;
+    costPerHour?: number;
+    totalBudget?: number;
+    riskLevel: string;
+    skillLevel: string;
+    techFamiliarity: string;
+    testingLevel: string;
+    confidence: number;
+  };
 }
 
 export default function DashboardPage() {
   const router = useRouter();
   const [userEmail, setUserEmail] = useState("");
-  const [activeTab, setActiveTab] = useState<"analyze" | "refine" | "history" | "user-stories" | "proposed-estimation" | "estimation" | "timeline" | "about">("analyze");
+  const [activeTab, setActiveTab] = useState<"analyze" | "refine" | "history" | "user-stories" | "proposed-estimation" | "estimation" | "generate-estimation" | "timeline" | "pitch-deck" | "about">("analyze");
   const [refreshHistory, setRefreshHistory] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [latestAnalysis, setLatestAnalysis] = useState<LatestAnalysis | null>(null);
   const [timelineEnabled, setTimelineEnabled] = useState(false);
+  const [pitchDeckEnabled, setPitchDeckEnabled] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [incompleteAnalysisWarning, setIncompleteAnalysisWarning] = useState<{show: boolean; message: string; analysisData: any} | null>(null);
+  const [estimationRefresh, setEstimationRefresh] = useState(false);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -62,6 +79,7 @@ export default function DashboardPage() {
         if (response.ok) {
           const data = await response.json();
           setTimelineEnabled(data.preferences?.timeline_enabled || false);
+          setPitchDeckEnabled(data.preferences?.pitch_deck_enabled || false);
         }
       } catch (err) {
         console.error("Error fetching preferences:", err);
@@ -279,6 +297,53 @@ export default function DashboardPage() {
                     {timelineEnabled ? "Disable" : "Enable"}
                   </button>
                 </div>
+
+                <div className="flex items-center justify-between mt-4">
+                  <div>
+                    <p className="font-semibold text-slate-900">Proposed Pitch Deck</p>
+                    <p className="text-sm text-slate-600 mt-1">
+                      {pitchDeckEnabled ? "✅ Enabled" : "❌ Disabled"}
+                    </p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const { data: { session } } = await supabase.auth.getSession();
+                        if (!session) {
+                          alert("Please sign in");
+                          return;
+                        }
+
+                        const response = await fetch("/api/user-preferences", {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                            "Authorization": `Bearer ${session.access_token}`,
+                          },
+                          body: JSON.stringify({
+                            pitch_deck_enabled: !pitchDeckEnabled,
+                          }),
+                        });
+
+                        if (response.ok) {
+                          setPitchDeckEnabled(!pitchDeckEnabled);
+                          setTimeout(() => {
+                            window.location.reload();
+                          }, 300);
+                        }
+                      } catch (err) {
+                        alert("Failed to update preference: " + (err instanceof Error ? err.message : "Unknown error"));
+                      }
+                    }}
+                    className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+                      pitchDeckEnabled
+                        ? "bg-red-600 text-white hover:bg-red-700"
+                        : "bg-green-600 text-white hover:bg-green-700"
+                    }`}
+                  >
+                    {pitchDeckEnabled ? "Disable" : "Enable"}
+                  </button>
+                </div>
                 <p className="text-xs text-slate-500 mt-3">
                   Show or hide the Project Timeline tab from your dashboard
                 </p>
@@ -364,6 +429,22 @@ export default function DashboardPage() {
               onClick={() => {
                 setIsTransitioning(true);
                 setTimeout(() => {
+                  setActiveTab("generate-estimation");
+                  setIsTransitioning(false);
+                }, 300);
+              }}
+              className={`px-4 py-2 font-medium transition-colors whitespace-nowrap text-sm ${
+                activeTab === "generate-estimation"
+                  ? "text-blue-600 border-b-2 border-blue-600"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              📊 Generate Estimation
+            </button>
+            <button
+              onClick={() => {
+                setIsTransitioning(true);
+                setTimeout(() => {
                   setActiveTab("proposed-estimation");
                   setIsTransitioning(false);
                 }, 300);
@@ -408,6 +489,24 @@ export default function DashboardPage() {
                 }`}
               >
                 Project Timeline
+              </button>
+            )}
+            {pitchDeckEnabled && (
+              <button
+                onClick={() => {
+                  setIsTransitioning(true);
+                  setTimeout(() => {
+                    setActiveTab("pitch-deck");
+                    setIsTransitioning(false);
+                  }, 300);
+                }}
+                className={`px-4 py-2 font-medium transition-colors whitespace-nowrap text-sm ${
+                  activeTab === "pitch-deck"
+                    ? "text-blue-600 border-b-2 border-blue-600"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                🎯 Proposed Pitch Deck
               </button>
             )}
           </div>
@@ -579,42 +678,116 @@ export default function DashboardPage() {
               </div>
             )}
           </div>
+        ) : activeTab === "generate-estimation" ? (
+          <div>
+            {latestAnalysis ? (
+              <EstimationTab
+                requirementId={latestAnalysis.id!}
+                complexityScore={latestAnalysis.complexityScore}
+                onEstimationComplete={(estimation) => {
+                  setLatestAnalysis({
+                    ...latestAnalysis,
+                    estimationData: estimation,
+                  });
+                  // Trigger EstimationHistory refresh
+                  setEstimationRefresh((prev) => !prev);
+                }}
+              />
+            ) : (
+              <div className="p-6 bg-white rounded-lg border border-slate-200 shadow-sm">
+                <p className="text-slate-600">
+                  No analysis results yet. Please complete an analysis in the{" "}
+                  <button
+                    onClick={() => {
+                      setIsTransitioning(true);
+                      setTimeout(() => {
+                        setActiveTab("history");
+                        setIsTransitioning(false);
+                      }, 300);
+                    }}
+                    className="text-blue-600 hover:text-blue-700 font-semibold"
+                  >
+                    Analysis History
+                  </button>{" "}
+                  tab to generate estimation details.
+                </p>
+              </div>
+            )}
+          </div>
         ) : activeTab === "proposed-estimation" ? (
           <div>
             {latestAnalysis ? (
               <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm space-y-6">
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900 mb-4">Proposed Estimation</h2>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
-                      <p className="text-sm text-slate-600 mb-1">Complexity Score</p>
-                      <p className="text-3xl font-bold text-blue-600">{latestAnalysis.complexityScore}</p>
-                      <p className="text-xs text-slate-600 mt-2">{latestAnalysis.complexityLevel} Complexity</p>
-                    </div>
-                    <div className="p-4 bg-green-50 rounded-lg border border-green-200">
-                      <p className="text-sm text-slate-600 mb-1">Dev Estimation</p>
-                      <p className="text-3xl font-bold text-green-600">~{Math.round(latestAnalysis.devManDays)}</p>
-                      <p className="text-xs text-slate-600 mt-2">Man-days</p>
-                    </div>
-                    <div className="p-4 bg-purple-50 rounded-lg border border-purple-200">
-                      <p className="text-sm text-slate-600 mb-1">QA Estimation</p>
-                      <p className="text-3xl font-bold text-purple-600">~{Math.round(latestAnalysis.qaManDays)}</p>
-                      <p className="text-xs text-slate-600 mt-2">Man-days</p>
+
+                  {/* Basic Metrics */}
+                  <div className="mb-8">
+                    <h3 className="text-lg font-semibold text-slate-800 mb-4">Basic Metrics</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                        <p className="text-sm text-slate-600 mb-1">Complexity Score</p>
+                        <p className="text-3xl font-bold text-blue-600">{latestAnalysis.complexityScore}</p>
+                        <p className="text-xs text-slate-600 mt-2">{latestAnalysis.complexityLevel} Complexity</p>
+                      </div>
+                      <div className="p-4 bg-green-50 rounded-lg border border-green-200">
+                        <p className="text-sm text-slate-600 mb-1">Basic Dev Estimation</p>
+                        <p className="text-3xl font-bold text-green-600">~{Math.round(latestAnalysis.devManDays)}</p>
+                        <p className="text-xs text-slate-600 mt-2">Man-days</p>
+                      </div>
+                      <div className="p-4 bg-purple-50 rounded-lg border border-purple-200">
+                        <p className="text-sm text-slate-600 mb-1">Basic QA Estimation</p>
+                        <p className="text-3xl font-bold text-purple-600">~{Math.round(latestAnalysis.qaManDays)}</p>
+                        <p className="text-xs text-slate-600 mt-2">Man-days</p>
+                      </div>
                     </div>
                   </div>
+
+                  {/* Calculated Estimation (if available) */}
+                  {latestAnalysis.estimationData && (
+                    <div className="mb-8 p-6 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border-2 border-blue-200">
+                      <h3 className="text-lg font-semibold text-slate-800 mb-4">✅ Calculated Estimation</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="p-4 bg-white rounded-lg border border-slate-200">
+                          <p className="text-sm text-slate-600 mb-1">Total Effort</p>
+                          <p className="text-3xl font-bold text-blue-600">{latestAnalysis.estimationData.totalEffort}</p>
+                          <p className="text-xs text-slate-600 mt-2">hours</p>
+                        </div>
+                        <div className="p-4 bg-white rounded-lg border border-slate-200">
+                          <p className="text-sm text-slate-600 mb-1">Estimated Timeline</p>
+                          <p className="text-3xl font-bold text-green-600">{latestAnalysis.estimationData.timeline}</p>
+                          <p className="text-xs text-slate-600 mt-2">weeks ({latestAnalysis.estimationData.teamSize} devs)</p>
+                        </div>
+                        {latestAnalysis.estimationData.totalBudget && (
+                          <div className="p-4 bg-white rounded-lg border border-slate-200">
+                            <p className="text-sm text-slate-600 mb-1">Total Budget</p>
+                            <p className="text-3xl font-bold text-purple-600">${(latestAnalysis.estimationData.totalBudget / 1000).toFixed(1)}K</p>
+                            <p className="text-xs text-slate-600 mt-2">estimated cost</p>
+                          </div>
+                        )}
+                      </div>
+                      <div className="mt-4 p-3 bg-blue-100 rounded border border-blue-300">
+                        <p className="text-sm text-blue-900">
+                          <strong>Confidence:</strong> {latestAnalysis.estimationData.confidence}%
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* CTA */}
+                  <button
+                    onClick={() => {
+                      setIsTransitioning(true);
+                      setTimeout(() => {
+                        setActiveTab("estimation");
+                        setIsTransitioning(false);
+                      }, 300);
+                    }}
+                    className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition-colors"
+                  >
+                    💾 View Estimation History
+                  </button>
                 </div>
-                <button
-                  onClick={() => {
-                    setIsTransitioning(true);
-                    setTimeout(() => {
-                      setActiveTab("estimation");
-                      setIsTransitioning(false);
-                    }, 300);
-                  }}
-                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition-colors"
-                >
-                  💾 Save Estimation Details
-                </button>
               </div>
             ) : (
               <div className="p-6 bg-white rounded-lg border border-slate-200 shadow-sm">
@@ -638,7 +811,7 @@ export default function DashboardPage() {
             )}
           </div>
         ) : activeTab === "estimation" ? (
-          <EstimationHistory key={String(refreshHistory)} />
+          <EstimationHistory key={String(estimationRefresh)} />
         ) : activeTab === "timeline" ? (
           <div>
             {latestAnalysis ? (
@@ -647,6 +820,7 @@ export default function DashboardPage() {
                 devManDays={latestAnalysis.devManDays}
                 complexityScore={latestAnalysis.complexityScore}
                 analysisId={latestAnalysis.id}
+                estimationData={latestAnalysis.estimationData}
               />
             ) : (
               <div className="p-6 bg-white rounded-lg border border-slate-200 shadow-sm">
@@ -665,6 +839,34 @@ export default function DashboardPage() {
                     Analysis History
                   </button>{" "}
                   tab to view the project timeline.
+                </p>
+              </div>
+            )}
+          </div>
+        ) : activeTab === "pitch-deck" ? (
+          <div>
+            {latestAnalysis && latestAnalysis.title ? (
+              <PitchDeckTab
+                requirementId={latestAnalysis.id || ""}
+                requirementTitle={latestAnalysis.title}
+              />
+            ) : (
+              <div className="p-6 bg-white rounded-lg border border-slate-200 shadow-sm">
+                <p className="text-slate-600">
+                  No analysis results yet. Please complete an analysis in the{" "}
+                  <button
+                    onClick={() => {
+                      setIsTransitioning(true);
+                      setTimeout(() => {
+                        setActiveTab("history");
+                        setIsTransitioning(false);
+                      }, 300);
+                    }}
+                    className="text-blue-600 hover:text-blue-700 font-semibold"
+                  >
+                    Analysis History
+                  </button>{" "}
+                  tab to create a pitch deck.
                 </p>
               </div>
             )}

@@ -669,20 +669,25 @@ function calculateConfidenceScoreUsingDecisionGraph(
 
 function createFallbackAnalysis(): ComplexityAnalysis {
   console.error("🚨 FALLBACK TRIGGERED: Analysis failed validation. Returning minimal default.");
+  // Use minimum valid graph structure: Start → End with 1 alternative path
+  const fallbackN = 2; // Minimum: Start + End nodes
+  const fallbackE = 1; // Minimum: one edge from Start to End
+  const fallbackP = 1; // Minimum: one path
+  const fallbackM = fallbackE - fallbackN + 2 * fallbackP; // M = 1 - 2 + 2(1) = 1
   return {
-    nodes: [],
-    edges: [],
-    paths: [],
-    nodesCount: 0,
-    edgesCount: 0,
-    connectedComponents: 0,
-    complexityScore: 5,
-    testScenarios: 5,
-    analysis: "Fallback analysis - unable to calculate",
+    nodes: ["Start", "End"],
+    edges: [{ from: "Start", to: "End", condition: "default" }],
+    paths: [["Start", "End"]],
+    nodesCount: fallbackN,
+    edgesCount: fallbackE,
+    connectedComponents: 1,
+    complexityScore: fallbackM,
+    testScenarios: 2 * fallbackP,
+    analysis: "Fallback analysis - unable to parse detailed complexity",
     decisionPoints: [],
-    alternativePaths: 5,
-    reasoning: "Analysis could not be properly parsed or validated. Please review the requirement and try again.",
-    confidenceScore: 0,  // ← ZERO confidence, not 75!
+    alternativePaths: fallbackP,
+    reasoning: "Analysis could not be properly parsed or validated. Using minimal complexity graph. Please review the requirement and try again.",
+    confidenceScore: 0,
     confidenceReason: "Failed to validate analysis - fallback used",
   };
 }
