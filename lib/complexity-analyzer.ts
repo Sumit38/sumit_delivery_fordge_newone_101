@@ -109,8 +109,18 @@ export async function analyzeRequirementComplexity(
 
     // Calculate question coverage
     const totalQuestions = 15;
-    const answeredQuestions = questionsMetadata?.filter(q => q.isAnswered) || [];
-    const answeredCount = answeredQuestions.length;
+
+    // ✅ CRITICAL FIX: Detect Q&A from requirement text if questionsMetadata is empty
+    // This handles cases where Q&A is embedded in the requirement text
+    let answeredQuestions = questionsMetadata?.filter(q => q.isAnswered) || [];
+    let answeredCount = answeredQuestions.length;
+
+    // If no metadata but text contains Q&A markers, detect from text
+    if (answeredCount === 0 && requirementText.includes("Q:") && requirementText.includes("A:")) {
+      const qAndAMatches = (requirementText.match(/^Q:/gm) || []).length;
+      answeredCount = Math.min(qAndAMatches, totalQuestions);
+      console.log(`⚠️ DETECTION: Found ${qAndAMatches} Q&A pairs in requirement text (questionsMetadata was empty)`);
+    }
 
     // HYBRID APPROACH: Infer unanswered questions from requirement text
     let inferredQuestions: QuestionMetadata[] = [];
@@ -135,6 +145,12 @@ export async function analyzeRequirementComplexity(
     const allAnalyzedQuestions = [...answeredQuestions, ...inferredQuestions];
     const totalAnalyzed = allAnalyzedQuestions.length;
     const coveragePercentage = Math.round((totalAnalyzed / totalQuestions) * 100);
+
+    // ✅ Log what will be passed to fallback for debugging
+    console.log(`\n🔍 FALLBACK DEBUG INFO:`);
+    console.log(`   analysispath: ${analysispath}`);
+    console.log(`   answeredCount: ${answeredCount}`);
+    console.log(`   coveragePercentage: ${coveragePercentage}%`);
 
     console.log(`📊 Coverage: ${answeredCount} answered + ${inferredQuestions.length} inferred = ${totalAnalyzed}/${totalQuestions} (${coveragePercentage}%)`);
 
@@ -326,7 +342,13 @@ M = E - N + 2P = [number]`,
       console.error(`  N: ${n}, E: ${e}, P: ${p}, M: ${m}`);
       console.error("\n📋 Full Claude response:");
       console.error(fullText);
-      return createFallbackAnalysis();
+      console.error("\n🔄 Using INTELLIGENT FALLBACK based on requirement text...");
+      return createFallbackAnalysis(
+        requirementText,
+        analysispath,
+        answeredCount,
+        coveragePercentage
+      );
     }
 
     // CRITICAL: Validate graph structure (E >= N-1 for connected graph)
@@ -338,7 +360,13 @@ M = E - N + 2P = [number]`,
       console.error(`   Nodes: ${nodesList.length} extracted vs ${n} stated`);
       console.error(`   Edges: ${edgesList.length} extracted vs ${e} stated`);
       console.error(`   Paths: ${pathsList.length} extracted vs ${p} stated`);
-      return createFallbackAnalysis();
+      console.error("\n🔄 Using INTELLIGENT FALLBACK based on requirement text...");
+      return createFallbackAnalysis(
+        requirementText,
+        analysispath,
+        answeredCount,
+        coveragePercentage
+      );
     }
 
     // CRITICAL: Check if extracted data matches stated counts (99% minimum required)
@@ -348,13 +376,26 @@ M = E - N + 2P = [number]`,
       console.error(`   Edges: extracted ${edgesList.length} vs stated ${e} (${((edgesList.length/e)*100).toFixed(1)}%) ${edgesList.length < e * 0.99 ? '❌ FAIL' : '✓'}`);
       console.error(`   Paths: extracted ${pathsList.length} vs stated ${p} (${((pathsList.length/p)*100).toFixed(1)}%) ${pathsList.length < p * 0.99 ? '❌ FAIL' : '✓'}`);
       console.error(`   Analysis is INCOMPLETE - Claude must extract ALL nodes/edges/paths!`);
+      console.error("\n🔄 Using INTELLIGENT FALLBACK based on requirement text...");
+      return createFallbackAnalysis(
+        requirementText,
+        analysispath,
+        answeredCount,
+        coveragePercentage
+      );
     }
 
     // Validate M calculation: should be M = E - N + 2P
     const calculatedM = e - n + 2 * p;
     if (calculatedM < 0) {
       console.error(`❌ CRITICAL: Negative complexity detected: M = ${calculatedM}. Invalid analysis.`);
-      return createFallbackAnalysis();
+      console.error("\n🔄 Using INTELLIGENT FALLBACK based on requirement text...");
+      return createFallbackAnalysis(
+        requirementText,
+        analysispath,
+        answeredCount,
+        coveragePercentage
+      );
     }
 
     // Warn if calculated M doesn't match extracted M
@@ -379,10 +420,11 @@ M = E - N + 2P = [number]`,
 
     if (analysispath === "guided") {
       // PATH 1: GUIDED (User answered 8-15 questions)
-      // Confidence = (Answered / 15) × 100
+      // Confidence = (Answered / 15) × 100 (Direct Claude analysis - no fallback penalty)
+      const guidedConfidence = Math.round((answeredCount / totalQuestions) * 100);
       confidenceData = {
-        score: coveragePercentage,
-        reason: `${answeredCount}/15 questions answered (${coveragePercentage}% coverage) - GUIDED PATH`,
+        score: guidedConfidence,
+        reason: `GUIDED PATH: User answered ${answeredCount}/15 questions (${guidedConfidence}% coverage). Direct Claude analysis succeeded.`,
         analysispath: "guided"
       };
       console.log(`\n📊 PATH 1 (GUIDED): Pure facts from ${answeredCount}/15 questions`);
@@ -390,13 +432,13 @@ M = E - N + 2P = [number]`,
     } else if (analysispath === "hybrid") {
       // PATH 2: HYBRID (User answered 2-7 questions + intelligent inference)
       // Confidence = (Answered + Inferred) / 15 × 100
-      const hybridConfidence = coveragePercentage;
+      // coveragePercentage already includes both answered and inferred
       const factsPercentage = Math.round((answeredCount / totalQuestions) * 100);
       const inferencePercentage = Math.round((inferredQuestions.length / totalQuestions) * 100);
 
       confidenceData = {
-        score: hybridConfidence,
-        reason: `${answeredCount}/15 answered (${factsPercentage}%) + ${inferredQuestions.length}/15 inferred (${inferencePercentage}%) = ${hybridConfidence}% - HYBRID PATH`,
+        score: coveragePercentage,
+        reason: `HYBRID PATH: User answered ${answeredCount}/15 (${factsPercentage}%) + ${inferredQuestions.length} inferred (${inferencePercentage}%) = ${coveragePercentage}% coverage. Direct Claude analysis succeeded.`,
         analysispath: "hybrid"
       };
       console.log(`\n📊 PATH 2 (HYBRID): ${answeredCount} facts + ${inferredQuestions.length} inferred = ${totalAnalyzed} total`);
@@ -667,28 +709,225 @@ function calculateConfidenceScoreUsingDecisionGraph(
   return { score: confidenceScore, reason: finalReason };
 }
 
-function createFallbackAnalysis(): ComplexityAnalysis {
-  console.error("🚨 FALLBACK TRIGGERED: Analysis failed validation. Returning minimal default.");
-  // Use minimum valid graph structure: Start → End with 1 alternative path
-  const fallbackN = 2; // Minimum: Start + End nodes
-  const fallbackE = 1; // Minimum: one edge from Start to End
-  const fallbackP = 1; // Minimum: one path
-  const fallbackM = fallbackE - fallbackN + 2 * fallbackP; // M = 1 - 2 + 2(1) = 1
+function estimateComplexityFromText(
+  requirementText: string,
+  analysisPath?: "guided" | "hybrid" | "direct",
+  answeredQuestionsCount?: number,
+  totalQuestionsCount: number = 15
+): {
+  estimatedComplexity: number;
+  estimatedNodes: number;
+  estimatedEdges: number;
+  estimatedPaths: number;
+  reasoning: string;
+  adjustedConfidence: number;
+} {
+  // INTELLIGENT FALLBACK: Estimate complexity from requirement text characteristics
+  // ENHANCED: Preserves analysis path information for accurate confidence scoring
+
+  const textLength = requirementText.length;
+  const lineCount = requirementText.split('\n').length;
+  const wordCount = requirementText.split(/\s+/).length;
+
+  // Count feature indicators
+  const keywords = {
+    actors: (requirementText.match(/actors?:/gi) || []).length || requirementText.split('\n').filter(l => l.includes('Actor') || l.includes('User')).length,
+    flows: (requirementText.match(/flows?:/gi) || []).length || (requirementText.match(/step \d+:/gi) || []).length,
+    conditions: (requirementText.match(/if|when|unless|then/gi) || []).length,
+    integrations: (requirementText.match(/integration|api|external|connect/gi) || []).length,
+    questions: (requirementText.match(/\?/g) || []).length,
+    complexFeatures: (requirementText.match(/concurrent|parallel|real-time|transaction|distributed|async|queue|cache|sync/gi) || []).length,
+    security: (requirementText.match(/security|permission|role|auth|encrypt|compliance|gdpr|pii/gi) || []).length,
+    dataOperations: (requirementText.match(/create|read|update|delete|edit|remove|export|import/gi) || []).length,
+  };
+
+  // Calculate estimated components
+  const flowSteps = Math.max(keywords.flows, Math.ceil(wordCount / 100)); // ~1 step per 100 words
+  const conditionals = Math.max(keywords.conditions / 2, 1); // 2 condition keywords ≈ 1 decision point
+  const actors = Math.max(keywords.actors, 1);
+  const externalSystems = Math.max(keywords.integrations / 2, 0);
+
+  // Estimate nodes: actors + flow steps + decision points + external systems + start/end
+  let estimatedNodes = 2 + // Start, End
+                       actors + // Each actor is a node
+                       flowSteps + // Each flow step
+                       conditionals + // Each decision point
+                       externalSystems; // External systems
+
+  // Estimate edges: connections between nodes
+  let estimatedEdges = Math.max(
+    1, // Minimum: Start → End
+    flowSteps + // Sequential flow edges
+    (conditionals * 2) + // Each conditional has 2+ branches
+    (actors > 1 ? actors - 1 : 0) + // Actor interactions
+    (externalSystems * 2) // Integration points
+  );
+
+  // Estimate paths: combinations based on decision points
+  let estimatedPaths = Math.max(
+    1,
+    Math.pow(2, conditionals) // 2^n paths for n decision points
+  );
+
+  // Cap at reasonable values for complexity calculation
+  estimatedNodes = Math.min(estimatedNodes, 50);
+  estimatedEdges = Math.min(estimatedEdges, 80);
+  estimatedPaths = Math.min(estimatedPaths, 32);
+
+  // Calculate McCabe complexity: M = E - N + 2P
+  const estimatedComplexity = estimatedEdges - estimatedNodes + (2 * estimatedPaths);
+
+  // Calculate confidence based on analysis path
+  let adjustedConfidence: number;
+  let pathNote: string = "";
+
+  if (analysisPath === "guided" && answeredQuestionsCount !== undefined && answeredQuestionsCount >= 8) {
+    // GUIDED PATH: User answered ≥8 questions (complete Q&A)
+    const baseConfidence = Math.round((answeredQuestionsCount / totalQuestionsCount) * 100);
+    const fallbackPenalty = 10; // Small penalty for fallback, but Q&A is strong
+    adjustedConfidence = Math.max(50, baseConfidence - fallbackPenalty);
+    pathNote = `GUIDED PATH: User answered ${answeredQuestionsCount}/${totalQuestionsCount} questions (${Math.round((answeredQuestionsCount / totalQuestionsCount) * 100)}% coverage).`;
+  } else if (analysisPath === "hybrid" && answeredQuestionsCount !== undefined && answeredQuestionsCount >= 2) {
+    // HYBRID PATH: User answered 2-7 questions (partial Q&A + inference)
+    const baseConfidence = Math.round((answeredQuestionsCount / totalQuestionsCount) * 80);
+    const fallbackPenalty = 15; // Moderate penalty for fallback + inference
+    adjustedConfidence = Math.max(40, baseConfidence - fallbackPenalty);
+    pathNote = `HYBRID PATH: User answered ${answeredQuestionsCount}/${totalQuestionsCount} questions + intelligent inference.`;
+  } else {
+    // DIRECT PATH: No Q&A (text analysis only)
+    adjustedConfidence = Math.max(40, 100 - Math.ceil(textLength / 50));
+    pathNote = `DIRECT PATH: No Q&A provided. Estimated entirely from requirement text.`;
+  }
+
+  // Build reasoning
+  const reasoning = `Estimated from requirement analysis:
+    - Text: ${wordCount} words, ${lineCount} lines
+    - Actors/Roles: ${keywords.actors} (adds ${actors} nodes)
+    - Flow Steps: ${keywords.flows} identified (adds ${flowSteps} nodes)
+    - Conditionals: ${keywords.conditions} keywords (adds ${conditionals} decision nodes)
+    - External Systems: ${keywords.integrations} keywords (adds ${externalSystems} integration nodes)
+    - Complex Features: ${keywords.complexFeatures} (real-time, async, distributed, etc.)
+    - Security Requirements: ${keywords.security} keywords
+    - Data Operations: ${keywords.dataOperations} keywords
+
+    Estimated McCabe Complexity: M = E - N + 2P = ${estimatedEdges} - ${estimatedNodes} + 2(${estimatedPaths}) = ${estimatedComplexity}
+
+    ${pathNote}
+
+    NOTE: This is an INTELLIGENT FALLBACK estimate when primary analysis failed.
+    ${analysisPath === "guided" ? "Q&A data provides strong confidence foundation." : "Confidence based on text analysis and available Q&A."}`;
+
   return {
-    nodes: ["Start", "End"],
-    edges: [{ from: "Start", to: "End", condition: "default" }],
-    paths: [["Start", "End"]],
-    nodesCount: fallbackN,
-    edgesCount: fallbackE,
+    estimatedComplexity,
+    estimatedNodes,
+    estimatedEdges,
+    estimatedPaths,
+    reasoning,
+    adjustedConfidence,
+  };
+}
+
+function createFallbackAnalysis(
+  requirementText: string = "",
+  analysisPath?: "guided" | "hybrid" | "direct",
+  answeredQuestionsCount?: number,
+  coveragePercentage?: number
+): ComplexityAnalysis {
+  console.error("🚨 FALLBACK TRIGGERED: Primary analysis failed. Calculating intelligent fallback...");
+  if (analysisPath) {
+    console.error(`   Analysis path: ${analysisPath.toUpperCase()} | Questions answered: ${answeredQuestionsCount ?? 0}/15 | Coverage: ${coveragePercentage ?? 0}%`);
+  }
+
+  if (!requirementText || requirementText.trim().length === 0) {
+    // ONLY use minimal default if no requirement text available
+    console.warn("⚠️ No requirement text provided. Using absolute minimal fallback.");
+    return {
+      nodes: ["Start", "End"],
+      edges: [{ from: "Start", to: "End", condition: "default" }],
+      paths: [["Start", "End"]],
+      nodesCount: 2,
+      edgesCount: 1,
+      connectedComponents: 1,
+      complexityScore: 1,
+      testScenarios: 2,
+      analysis: "EMPTY REQUIREMENT: Unable to analyze. Requirement text is missing or empty.",
+      decisionPoints: [],
+      alternativePaths: 1,
+      reasoning: "No requirement text provided. Cannot perform complexity analysis. Please provide a valid requirement.",
+      confidenceScore: 0,
+      confidenceReason: "Empty input - fallback with minimal estimate",
+    };
+  }
+
+  // Intelligent estimation from requirement text
+  // ENHANCED: Pass analysis path info for accurate confidence scoring
+  const estimate = estimateComplexityFromText(
+    requirementText,
+    analysisPath,
+    answeredQuestionsCount,
+    15
+  );
+
+  // Build graph nodes based on estimate
+  const nodes: string[] = [
+    "Start",
+    ...Array.from({ length: estimate.estimatedNodes - 2 }, (_, i) => `Component_${i + 1}`),
+    "End",
+  ];
+
+  // Build edges
+  const edges = [];
+  edges.push({ from: "Start", to: nodes[1] || "End", condition: "init" });
+
+  for (let i = 1; i < nodes.length - 1; i++) {
+    const nextNode = nodes[i + 1] || "End";
+    edges.push({ from: nodes[i], to: nextNode, condition: `path_${i}` });
+
+    // Add alternative paths based on conditionals
+    if (i % 3 === 0 && estimate.estimatedPaths > 1) {
+      edges.push({ from: nodes[i], to: nodes[Math.max(1, i - 1)], condition: `alt_path_${i}` });
+    }
+  }
+
+  // Build paths
+  const paths: string[][] = [];
+  for (let p = 0; p < Math.min(estimate.estimatedPaths, 5); p++) {
+    const path = [nodes[0]];
+    for (let i = 1; i < nodes.length - 1; i++) {
+      if (Math.random() > 0.3 || p === 0) { // Ensure at least one complete path
+        path.push(nodes[i]);
+      }
+    }
+    path.push(nodes[nodes.length - 1]);
+    paths.push(path);
+  }
+
+  return {
+    nodes,
+    edges: edges.slice(0, estimate.estimatedEdges), // Limit to estimated edge count
+    paths,
+    nodesCount: estimate.estimatedNodes,
+    edgesCount: estimate.estimatedEdges,
     connectedComponents: 1,
-    complexityScore: fallbackM,
-    testScenarios: 2 * fallbackP,
-    analysis: "Fallback analysis - unable to parse detailed complexity",
-    decisionPoints: [],
-    alternativePaths: fallbackP,
-    reasoning: "Analysis could not be properly parsed or validated. Using minimal complexity graph. Please review the requirement and try again.",
-    confidenceScore: 0,
-    confidenceReason: "Failed to validate analysis - fallback used",
+    complexityScore: estimate.estimatedComplexity,
+    testScenarios: Math.max(2 * estimate.estimatedPaths, 2),
+    analysis: `Intelligent fallback analysis based on requirement text characteristics.
+    Identified ${estimate.estimatedNodes} components with ${estimate.estimatedEdges} interactions.
+    Estimated complexity reflects requirement features, actors, flows, and conditionals.`,
+    decisionPoints: Array.from(
+      { length: Math.min(estimate.estimatedPaths - 1, 10) },
+      (_, i) => `Decision_${i + 1}`
+    ),
+    alternativePaths: estimate.estimatedPaths,
+    reasoning: estimate.reasoning,
+    confidenceScore: estimate.adjustedConfidence, // Use analysis-path-aware confidence
+    confidenceReason: `${
+      analysisPath === "guided"
+        ? `GUIDED PATH: User answered ${answeredQuestionsCount}/15 questions (${Math.round(((answeredQuestionsCount ?? 0) / 15) * 100)}% coverage). Primary Claude analysis validation failed, but Q&A data provides strong confidence foundation. Using intelligent fallback with Q&A-backed estimates.`
+        : analysisPath === "hybrid"
+        ? `HYBRID PATH: User answered ${answeredQuestionsCount}/15 questions with intelligent inference (${coveragePercentage ?? Math.round(((answeredQuestionsCount ?? 0) / 15) * 100)}% coverage). Primary analysis failed; using text analysis + Q&A backup.`
+        : `DIRECT PATH: No Q&A provided. Estimated entirely from requirement text (${requirementText.length} chars). Primary analysis failed; using text-only analysis.`
+    } Confidence: ${estimate.adjustedConfidence}%.`,
   };
 }
 
