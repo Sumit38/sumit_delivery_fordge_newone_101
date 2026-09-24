@@ -120,3 +120,7 @@ RESPOND IN THIS EXACT JSON FORMAT (no markdown):
     );
   }
 }
+
+// ✅ VERCEL CONFIGURATION: Allow longer analysis times
+export const maxDuration = 300; // 5 minutes timeout for dual analysis
+export const dynamic = 'force-dynamic'; // Prevent caching issues after idle

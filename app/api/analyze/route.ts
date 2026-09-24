@@ -396,3 +396,9 @@ function sanitizeText(text: string): string {
     .replace(/\0/g, "") // Null character (extra safety)
     .replace(/\\u0000/g, ""); // Escaped null character
 }
+
+// ✅ VERCEL CONFIGURATION: Allow longer analysis times
+// Default Vercel timeout is 10s (Hobby) or 60s (Pro)
+// Complex analysis can take up to 5 minutes, especially after idle
+export const maxDuration = 300; // 5 minutes timeout for complexity analysis
+export const dynamic = 'force-dynamic'; // Prevent caching issues after idle
