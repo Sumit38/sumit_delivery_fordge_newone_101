@@ -117,9 +117,22 @@ export async function analyzeRequirementComplexity(
 
     // If no metadata but text contains Q&A markers, detect from text
     if (answeredCount === 0 && requirementText.includes("Q:") && requirementText.includes("A:")) {
-      const qAndAMatches = (requirementText.match(/^Q:/gm) || []).length;
-      answeredCount = Math.min(qAndAMatches, totalQuestions);
-      console.log(`⚠️ DETECTION: Found ${qAndAMatches} Q&A pairs in requirement text (questionsMetadata was empty)`);
+      // CRITICAL FIX: Count only SELECTED answers (user answered), not all Q&A pairs
+      // Pattern: "A: Selected: ..." indicates user selection
+      // Avoid counting system-generated or partial answers
+      const selectedAnswers = (requirementText.match(/A:\s*Selected:/gm) || []).length;
+      const totalQPairs = (requirementText.match(/^Q:/gm) || []).length;
+
+      // Use selected answers count if found, otherwise fall back to total Q pairs
+      answeredCount = selectedAnswers > 0 ? selectedAnswers : Math.min(totalQPairs, totalQuestions);
+      answeredCount = Math.min(answeredCount, totalQuestions);
+
+      console.log(`⚠️ DETECTION: Found ${selectedAnswers} SELECTED answers and ${totalQPairs} total Q pairs in requirement text`);
+      if (selectedAnswers > 0) {
+        console.log(`   → Using SELECTED answers count: ${selectedAnswers}`);
+      } else {
+        console.log(`   → No "Selected:" pattern found, using total Q pairs: ${totalQPairs}`);
+      }
     }
 
     // HYBRID APPROACH: Infer unanswered questions from requirement text
