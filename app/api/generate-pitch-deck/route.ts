@@ -69,47 +69,60 @@ export async function POST(request: NextRequest) {
       })
       .join("\n");
 
-    // Generate pitch deck using Claude
+    // Generate pitch deck using Claude - with structured data for professional design
     const response = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 4000,
+      max_tokens: 5000,
       temperature: 0.7,
       messages: [
         {
           role: "user",
-          content: `Create a professional 8-10 slide pitch deck outline based on these answers:
+          content: `Create a professional executive-grade pitch deck based on these answers:
 
 PROJECT: ${requirementTitle}
 
 ANSWERS:
 ${answersSummary}
 
-Generate a compelling pitch deck with the following structure:
-1. Title Slide - Project name and tagline
-2. Problem - What problem are we solving?
-3. Solution - How does this solve the problem?
-4. Market Opportunity - Size and potential
-5. Value Proposition - Key benefits
-6. Business Model - Revenue model
-7. Competitive Advantage - Why us?
-8. Go-to-Market - How we'll reach customers
-9. Key Metrics - Success measures
-10. Call to Action - Next steps
+Generate a compelling 9-slide pitch deck with UNIQUE styling for each slide type:
+
+STRUCTURE & SLIDE TYPES:
+1. TITLE SLIDE - Project name with compelling tagline (full-screen impact)
+2. PROBLEM SLIDE - Current challenge/pain point (problem statement)
+3. SOLUTION SLIDE - Your solution approach (how you solve it)
+4. MARKET OPPORTUNITY - Market size & growth potential (opportunity slide)
+5. VALUE PROPOSITION - Key benefits & differentiation (value statement)
+6. ROADMAP SLIDE - Project timeline with phases & milestones (timeline visualization)
+7. COMPETITIVE ADVANTAGE - Why you're better (competitive positioning)
+8. KEY METRICS - Success measures & KPIs (metrics dashboard)
+9. CALL TO ACTION - Next steps & engagement (closing slide)
+
+For ROADMAP SLIDE specifically, provide:
+- phases: Array of {name, duration, startMonth, endMonth, description}
+- milestones: Array of {name, month, description}
+- Example: phases: [{name: "Planning", duration: "2 weeks", startMonth: 1, endMonth: 1}, ...]
 
 For each slide, provide:
-- A compelling title
-- 3-5 key bullet points
-- Optional notes for the presenter
+- slideType: "title" | "problem" | "solution" | "market" | "value" | "roadmap" | "competitive" | "metrics" | "cta"
+- title: Compelling slide title
+- description: 2-3 sentence overview
+- content: Array of key points (3-5 items)
+- notes: Optional presenter notes
+- specialData: For roadmap/metrics - structured data for visualization
 
-Format as JSON:
+Format EXACTLY as JSON (no markdown):
 {
-  "title": "Project Name - Pitch Deck",
+  "title": "Project Name - Executive Pitch Deck",
   "slides": [
     {
       "slideNumber": 1,
+      "slideType": "title",
       "title": "Slide Title",
-      "content": ["Point 1", "Point 2", "Point 3"],
-      "notes": "Optional presenter notes"
+      "tagline": "For title slide only",
+      "description": "Brief overview",
+      "content": ["Point 1", "Point 2"],
+      "notes": "Presenter notes",
+      "specialData": {}
     }
   ]
 }`,
@@ -140,12 +153,16 @@ Format as JSON:
     }
 
     const pitchDeck = {
-      title: pitchDeckData.title || `${requirementTitle} - Pitch Deck`,
+      title: pitchDeckData.title || `${requirementTitle} - Executive Pitch Deck`,
       slides: pitchDeckData.slides.map((slide: any) => ({
         slideNumber: slide.slideNumber || 0,
+        slideType: slide.slideType || "content",
         title: slide.title || "Untitled Slide",
+        tagline: slide.tagline || "",
+        description: slide.description || "",
         content: Array.isArray(slide.content) ? slide.content : [String(slide.content)],
-        notes: slide.notes,
+        notes: slide.notes || "",
+        specialData: slide.specialData || {},
       })),
       generatedAt: new Date().toISOString(),
     };
