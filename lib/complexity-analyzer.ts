@@ -848,6 +848,113 @@ function estimateComplexityFromText(
   };
 }
 
+function extractMainFlowComponents(requirementText: string): string[] {
+  // Extract meaningful component names from MAIN FLOW section
+  const flowMatch = requirementText.match(/MAIN\s+FLOW:?([\s\S]*?)(?=CLARIFICATIONS|PRECONDITIONS|$)/i);
+  if (!flowMatch) return [];
+
+  const flowText = flowMatch[1];
+  const steps: string[] = [];
+
+  // Extract numbered steps like "Step 1: Description"
+  const stepMatches = flowText.match(/step\s+\d+:?\s*([^\n]+)/gi);
+  if (stepMatches) {
+    stepMatches.forEach((step, idx) => {
+      // Clean up: remove "Step N:" prefix and extract just the description
+      const description = step.replace(/step\s+\d+:?\s*/i, "").trim();
+      if (description) {
+        // Create a node name from the first 50 chars of the description
+        const nodeName = description.substring(0, 50).replace(/[^a-zA-Z0-9\s]/g, "").trim();
+        if (nodeName.length > 5) {
+          steps.push(`N${idx + 1}: ${nodeName}`);
+        }
+      }
+    });
+  }
+
+  return steps;
+}
+
+function extractActorsFromRequirement(requirementText: string): string[] {
+  // Extract actors from ACTORS: section
+  const actorMatch = requirementText.match(/ACTORS:?([\s\S]*?)(?=PRECONDITIONS|MAIN\s+FLOW|$)/i);
+  if (!actorMatch) return [];
+
+  const actorText = actorMatch[1];
+  const actors: string[] = [];
+
+  // Extract lines that look like actor names
+  const lines = actorText.split('\n');
+  lines.forEach((line) => {
+    const cleaned = line.replace(/^[-•*\s]+/, "").trim();
+    if (cleaned && cleaned.length > 2 && cleaned.length < 50) {
+      actors.push(cleaned);
+    }
+  });
+
+  return actors;
+}
+
+function createDescriptiveNodes(requirementText: string, targetNodeCount: number): string[] {
+  const nodes: string[] = ["Start"];
+
+  // Extract components from main flow
+  const flowComponents = extractMainFlowComponents(requirementText);
+  const actors = extractActorsFromRequirement(requirementText);
+
+  // Use extracted components first
+  if (flowComponents.length > 0) {
+    nodes.push(...flowComponents.slice(0, Math.max(1, targetNodeCount - 4)));
+  }
+
+  // Add actors if we need more nodes and have room
+  if (nodes.length < targetNodeCount - 1 && actors.length > 0) {
+    const actorNodesToAdd = Math.min(actors.length, Math.max(1, targetNodeCount - nodes.length - 1));
+    actors.slice(0, actorNodesToAdd).forEach((actor, idx) => {
+      nodes.push(`A${idx + 1}: ${actor}`);
+    });
+  }
+
+  // Fill remaining slots with generic components if needed
+  const remainingSlots = Math.max(1, targetNodeCount - nodes.length - 1);
+  for (let i = 0; i < remainingSlots; i++) {
+    nodes.push(`Component_${i + 1}`);
+  }
+
+  // Add End node
+  nodes.push("End");
+
+  return nodes.slice(0, targetNodeCount);
+}
+
+function createDescriptiveEdges(nodes: string[], estimatedEdgeCount: number): Array<{from: string, to: string, condition: string}> {
+  const edges: Array<{from: string, to: string, condition: string}> = [];
+
+  // Start → First node
+  if (nodes.length > 1) {
+    edges.push({ from: nodes[0], to: nodes[1], condition: "initialize" });
+  }
+
+  // Sequential flow through nodes
+  for (let i = 1; i < nodes.length - 1; i++) {
+    const nextNode = nodes[i + 1] || "End";
+    edges.push({ from: nodes[i], to: nextNode, condition: `process` });
+  }
+
+  // Add decision-based branches if we need more edges
+  if (edges.length < estimatedEdgeCount && nodes.length > 2) {
+    for (let i = 1; i < Math.min(nodes.length - 1, Math.ceil(nodes.length / 2)); i++) {
+      if (edges.length >= estimatedEdgeCount) break;
+      const branchTarget = nodes[Math.max(1, i - 1)] || "End";
+      if (nodes[i] !== branchTarget) {
+        edges.push({ from: nodes[i], to: branchTarget, condition: `alternate_flow` });
+      }
+    }
+  }
+
+  return edges.slice(0, estimatedEdgeCount);
+}
+
 function createFallbackAnalysis(
   requirementText: string = "",
   analysisPath?: "guided" | "hybrid" | "direct",
@@ -889,26 +996,11 @@ function createFallbackAnalysis(
     15
   );
 
-  // Build graph nodes based on estimate
-  const nodes: string[] = [
-    "Start",
-    ...Array.from({ length: estimate.estimatedNodes - 2 }, (_, i) => `Component_${i + 1}`),
-    "End",
-  ];
+  // Build descriptive nodes from requirement text instead of generic placeholders
+  const nodes = createDescriptiveNodes(requirementText, estimate.estimatedNodes);
 
-  // Build edges
-  const edges = [];
-  edges.push({ from: "Start", to: nodes[1] || "End", condition: "init" });
-
-  for (let i = 1; i < nodes.length - 1; i++) {
-    const nextNode = nodes[i + 1] || "End";
-    edges.push({ from: nodes[i], to: nextNode, condition: `path_${i}` });
-
-    // Add alternative paths based on conditionals
-    if (i % 3 === 0 && estimate.estimatedPaths > 1) {
-      edges.push({ from: nodes[i], to: nodes[Math.max(1, i - 1)], condition: `alt_path_${i}` });
-    }
-  }
+  // Build descriptive edges
+  const edges = createDescriptiveEdges(nodes, estimate.estimatedEdges);
 
   // Build paths
   const paths: string[][] = [];
@@ -923,6 +1015,11 @@ function createFallbackAnalysis(
     paths.push(path);
   }
 
+  // Extract decision points from nodes that sound like decision points
+  const decisionPoints = nodes
+    .filter(n => n.includes("Decision") || n.includes("Check") || n.includes("Verify"))
+    .slice(0, Math.min(estimate.estimatedPaths - 1, 10));
+
   return {
     nodes,
     edges: edges.slice(0, estimate.estimatedEdges), // Limit to estimated edge count
@@ -935,7 +1032,7 @@ function createFallbackAnalysis(
     analysis: `Intelligent fallback analysis based on requirement text characteristics.
     Identified ${estimate.estimatedNodes} components with ${estimate.estimatedEdges} interactions.
     Estimated complexity reflects requirement features, actors, flows, and conditionals.`,
-    decisionPoints: Array.from(
+    decisionPoints: decisionPoints.length > 0 ? decisionPoints : Array.from(
       { length: Math.min(estimate.estimatedPaths - 1, 10) },
       (_, i) => `Decision_${i + 1}`
     ),
