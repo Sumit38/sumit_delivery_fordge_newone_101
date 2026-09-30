@@ -110,55 +110,72 @@ function addContentSlide(prs: any, slide: any, totalSlides: number) {
   // Slide title
   slideObj.addText(slide.title, {
     x: 0.5,
-    y: 0.25,
-    w: 8.5,
-    h: 0.6,
+    y: 0.2,
+    w: 9,
+    h: 0.65,
     fontSize: 36,
     bold: true,
     color: EXECUTIVE_COLORS.gold,
     fontFace: "Calibri",
     align: "left",
+    wrap: true,
   });
 
   // Description paragraph
+  let currentY = 1.0;
   if (slide.description) {
     slideObj.addText(slide.description, {
       x: 0.7,
-      y: 1.3,
+      y: currentY,
       w: 8.6,
-      h: 0.8,
-      fontSize: 14,
+      h: 0.7,
+      fontSize: 13,
       color: EXECUTIVE_COLORS.darkText,
       fontFace: "Calibri",
       align: "left",
+      wrap: true,
     });
+    currentY = 1.85;
+  } else {
+    currentY = 1.15;
   }
 
-  // Content bullets with gold dots
-  let yPosition = 2.3;
-  slide.content.forEach((point: string) => {
+  // Content bullets with gold dots - with proper spacing
+  const maxContentArea = 6.5; // Leave room for footer at 6.9
+  const bulletHeight = 0.5;
+  const bulletSpacing = 0.85; // Increased spacing
+  let yPosition = currentY;
+
+  slide.content.forEach((point: string, index: number) => {
+    // Check if we're running out of space
+    if (yPosition + bulletHeight > maxContentArea) {
+      return; // Stop adding bullets if we run out of space
+    }
+
     // Gold bullet dot
     slideObj.addShape(prs.ShapeType.ellipse, {
       x: 0.7,
-      y: yPosition + 0.15,
-      w: 0.15,
-      h: 0.15,
+      y: yPosition + 0.17,
+      w: 0.12,
+      h: 0.12,
       fill: { color: EXECUTIVE_COLORS.gold },
       line: { type: "none" },
     });
 
-    // Bullet text
+    // Bullet text with word wrapping
     slideObj.addText(point, {
-      x: 1.1,
+      x: 1.0,
       y: yPosition,
-      w: 8.2,
-      h: 0.5,
-      fontSize: 16,
+      w: 8.5,
+      h: bulletHeight,
+      fontSize: 15,
       color: EXECUTIVE_COLORS.darkText,
       fontFace: "Calibri",
       align: "left",
+      wrap: true,
     });
-    yPosition += 0.75;
+
+    yPosition += bulletSpacing;
   });
 
   // Add footer
@@ -235,42 +252,44 @@ function addRoadmapSlide(prs: any, slide: any, totalSlides: number) {
     align: "left",
   });
 
-  // Timeline visualization
+  // Timeline visualization with better spacing
   const phases = slide.specialData?.phases || [];
-  const timelineStartY = 1.8;
-  const phaseWidth = 8.5 / Math.max(phases.length, 1);
-  const phaseStartX = 0.75;
+  const timelineStartY = 1.5;
+  const phaseWidth = Math.min(8.5 / Math.max(phases.length, 1), 2.5); // Limit max width
+  const totalPhasesWidth = phaseWidth * Math.max(phases.length, 1);
+  const phaseStartX = (10 - totalPhasesWidth) / 2; // Center the phases
+  const phaseGapX = phaseWidth > 2.0 ? 0.1 : 0.05;
 
   // Draw timeline connector line
   slideObj.addShape(prs.ShapeType.line, {
     x: phaseStartX,
-    y: timelineStartY + 0.5,
-    w: 8.5,
+    y: timelineStartY + 0.4,
+    w: totalPhasesWidth,
     h: 0,
-    line: { color: EXECUTIVE_COLORS.gold, width: 3 },
+    line: { color: EXECUTIVE_COLORS.gold, width: 2 },
   });
 
   // Draw phases
-  phases.forEach((phase: any, index: number) => {
-    const phaseX = phaseStartX + (index * phaseWidth);
+  phases.slice(0, 4).forEach((phase: any, index: number) => {
+    const phaseX = phaseStartX + (index * (phaseWidth + phaseGapX));
 
     // Phase circle
     slideObj.addShape(prs.ShapeType.ellipse, {
-      x: phaseX + phaseWidth / 2 - 0.25,
-      y: timelineStartY + 0.25,
-      w: 0.5,
-      h: 0.5,
+      x: phaseX + phaseWidth / 2 - 0.22,
+      y: timelineStartY + 0.15,
+      w: 0.44,
+      h: 0.44,
       fill: { color: EXECUTIVE_COLORS.darkNavy },
       line: { color: EXECUTIVE_COLORS.gold, width: 2 },
     });
 
     // Phase number
     slideObj.addText((index + 1).toString(), {
-      x: phaseX + phaseWidth / 2 - 0.2,
-      y: timelineStartY + 0.27,
-      w: 0.4,
-      h: 0.4,
-      fontSize: 20,
+      x: phaseX + phaseWidth / 2 - 0.18,
+      y: timelineStartY + 0.17,
+      w: 0.36,
+      h: 0.36,
+      fontSize: 18,
       bold: true,
       color: EXECUTIVE_COLORS.gold,
       fontFace: "Calibri",
@@ -280,38 +299,41 @@ function addRoadmapSlide(prs: any, slide: any, totalSlides: number) {
     // Phase name
     slideObj.addText(phase.name, {
       x: phaseX,
-      y: timelineStartY + 0.95,
+      y: timelineStartY + 0.75,
       w: phaseWidth,
       h: 0.4,
-      fontSize: 12,
+      fontSize: 11,
       bold: true,
       color: EXECUTIVE_COLORS.darkNavy,
       fontFace: "Calibri",
       align: "center",
+      wrap: true,
     });
 
     // Duration
     slideObj.addText(phase.duration, {
       x: phaseX,
-      y: timelineStartY + 1.35,
+      y: timelineStartY + 1.2,
       w: phaseWidth,
       h: 0.3,
-      fontSize: 11,
+      fontSize: 10,
       color: EXECUTIVE_COLORS.gold,
       fontFace: "Calibri",
       align: "center",
+      wrap: true,
     });
 
     // Description
     slideObj.addText(phase.description, {
-      x: phaseX - 0.2,
-      y: timelineStartY + 1.7,
-      w: phaseWidth + 0.4,
-      h: 0.6,
-      fontSize: 9,
+      x: phaseX - 0.1,
+      y: timelineStartY + 1.6,
+      w: phaseWidth + 0.2,
+      h: 0.8,
+      fontSize: 8,
       color: EXECUTIVE_COLORS.darkText,
       fontFace: "Calibri",
       align: "center",
+      wrap: true,
     });
   });
 
@@ -389,19 +411,27 @@ function addMetricsSlide(prs: any, slide: any, totalSlides: number) {
     align: "left",
   });
 
-  // Content as metric cards
+  // Content as metric cards with proper spacing
   const cardWidth = 4;
-  const cardHeight = 1.2;
+  const cardHeight = 1.3;
+  const cardGapX = 0.3; // Gap between columns
+  const cardGapY = 0.5; // Gap between rows
   let cardX = 0.5;
-  let cardY = 1.8;
+  let cardY = 1.5;
   let cardCount = 0;
+  const maxCards = 6; // Limit to 6 cards to avoid overlapping footer
 
-  slide.content.forEach((metric: string) => {
+  slide.content.slice(0, maxCards).forEach((metric: string) => {
     if (cardCount > 0 && cardCount % 2 === 0) {
       cardX = 0.5;
-      cardY += 1.6;
+      cardY += cardHeight + cardGapY;
     } else if (cardCount > 0) {
-      cardX = 5.2;
+      cardX = 0.5 + cardWidth + cardGapX;
+    }
+
+    // Check if card will overlap with footer (footer at 6.9)
+    if (cardY + cardHeight > 6.5) {
+      return; // Stop adding cards if we run out of space
     }
 
     // Card background (navy)
@@ -414,18 +444,19 @@ function addMetricsSlide(prs: any, slide: any, totalSlides: number) {
       line: { color: EXECUTIVE_COLORS.gold, width: 2 },
     });
 
-    // Card text
+    // Card text with word wrapping
     slideObj.addText(metric, {
-      x: cardX + 0.2,
+      x: cardX + 0.15,
       y: cardY + 0.15,
-      w: cardWidth - 0.4,
+      w: cardWidth - 0.3,
       h: cardHeight - 0.3,
-      fontSize: 14,
+      fontSize: 13,
       bold: true,
       color: EXECUTIVE_COLORS.gold,
       fontFace: "Calibri",
       align: "center",
       valign: "middle",
+      wrap: true,
     });
 
     cardCount++;
