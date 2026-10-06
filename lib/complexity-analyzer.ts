@@ -107,6 +107,18 @@ export async function analyzeRequirementComplexity(
   try {
     console.log("🔍 Analyzing requirement with cyclomatic complexity formula...");
 
+    // ⚠️ HANDLE VERY LARGE REQUIREMENTS: Check text size
+    const textSizeKB = Buffer.byteLength(requirementText, 'utf8') / 1024;
+    console.log(`📏 Requirement size: ${textSizeKB.toFixed(1)}KB`);
+
+    if (textSizeKB > 80) {
+      console.warn(`⚠️ Large requirement detected (${textSizeKB.toFixed(1)}KB). Truncating for analysis...`);
+      // For very large requirements, truncate to first 80KB to avoid protocol errors
+      const maxChars = Math.floor(80 * 1024 / 2); // Approximate character count
+      requirementText = requirementText.substring(0, maxChars) + "\n[... requirement truncated due to size ...]";
+      console.warn(`✂️ Truncated to ~80KB. Use fallback if analysis still fails.`);
+    }
+
     // Calculate question coverage
     const totalQuestions = 15;
 

@@ -94,6 +94,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // ⚠️ CHECK FOR VERY LARGE REQUIREMENTS (>100KB)
+    const textSizeKB = Buffer.byteLength(requirementText, 'utf8') / 1024;
+    if (textSizeKB > 100) {
+      console.warn(`⚠️ [2/5] Large requirement detected: ${textSizeKB.toFixed(1)}KB`);
+      // For large requirements, we'll use a simplified analysis approach
+      console.warn("⚠️ [2/5] Switching to fallback analysis for large requirements (>100KB)");
+    }
+
     console.log("✅ [2/5] Request validation successful");
     console.log("🔍 [3/5] Checking Supabase connection...");
 
@@ -137,13 +145,56 @@ export async function POST(request: NextRequest) {
 
     console.log("🔍 [4/5] Analyzing requirement complexity...");
 
-    // ✅ STEP 4: Claude API Analysis
+    // ✅ STEP 4: Claude API Analysis with retry logic
     let analysis;
-    try {
-      analysis = await analyzeRequirementComplexity(requirementText, questionsMetadata);
-      console.log("✅ [4/5] Complexity analysis successful");
-    } catch (analysisError) {
-      console.error("⚠️ [4/5] Claude API error, using fallback:", analysisError);
+    let analysisAttempts = 0;
+    const maxAttempts = 2;
+    let lastError: any = null;
+
+    while (analysisAttempts < maxAttempts && !analysis) {
+      try {
+        analysisAttempts++;
+        console.log(`Attempt ${analysisAttempts}/${maxAttempts} to analyze requirement...`);
+
+        // Add timeout handling for Claude API
+        const analysisPromise = analyzeRequirementComplexity(requirementText, questionsMetadata);
+
+        // Set a 55-second timeout (leaving room for Vercel's 5-minute limit)
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Analysis timeout - Claude API took too long")), 55000)
+        );
+
+        analysis = await Promise.race([analysisPromise, timeoutPromise]);
+        console.log("✅ [4/5] Complexity analysis successful");
+      } catch (analysisError: any) {
+        lastError = analysisError;
+        console.error(`⚠️ [4/5] Attempt ${analysisAttempts} failed:`, analysisError?.message || analysisError);
+
+        // Check if it's a network/protocol error
+        const isNetworkError =
+          analysisError?.message?.includes("HTTP2") ||
+          analysisError?.message?.includes("ERR_") ||
+          analysisError?.message?.includes("timeout") ||
+          analysisError?.message?.includes("ECONNRESET") ||
+          analysisError?.message?.includes("EPIPE");
+
+        if (isNetworkError && analysisAttempts < maxAttempts) {
+          console.warn(`⚠️ Network error detected. Retrying... (${analysisAttempts}/${maxAttempts})`);
+          // Wait before retry
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          continue;
+        }
+
+        // If retry failed or not a network error, use fallback
+        console.warn("⚠️ [4/5] Using fallback analysis due to API error");
+        analysis = null;
+        break;
+      }
+    }
+
+    // Use fallback if all attempts failed
+    if (!analysis) {
+      console.error("⚠️ [4/5] All analysis attempts failed, using fallback");
       analysis = {
         nodes: ["Start", "Input", "Process", "Output", "End"],
         edges: [
@@ -158,10 +209,19 @@ export async function POST(request: NextRequest) {
         connectedComponents: 1,
         complexityScore: 0,
         testScenarios: 5,
-        analysis: "Analysis using fallback structure",
+        analysis: `Fallback analysis (API error: ${lastError?.message || "unknown"})`,
         decisionPoints: ["Input", "Process"],
         alternativePaths: 1,
+        reasoning: `Attempted ${analysisAttempts} times but failed due to network/protocol error`,
+        confidenceScore: 20,
+        confidenceReason: "Fallback estimate - primary analysis failed",
+        analyzedScenarios: undefined,
       };
+    }
+
+    // Ensure analysis is always a valid ComplexityAnalysis object
+    if (!analysis || typeof analysis !== 'object' || !('nodes' in analysis)) {
+      throw new Error("Analysis failed to produce valid result");
     }
 
     // Sanitize analysis data
@@ -354,12 +414,12 @@ export async function POST(request: NextRequest) {
         confidenceScore: sanitizedAnalysis.confidenceScore,
         confidenceReason: sanitizedAnalysis.confidenceReason,
         // THREE-PATH SYSTEM: Show which analysis path was used
-        analysispath: sanitizedAnalysis.analyzedScenarios?.analysisPath || "direct",
+        analysispath: (sanitizedAnalysis.analyzedScenarios as any)?.analysisPath || "direct",
         analyzedScenarios: sanitizedAnalysis.analyzedScenarios,
         analysisMethod:
-          sanitizedAnalysis.analyzedScenarios?.analysisPath === "guided"
+          (sanitizedAnalysis.analyzedScenarios as any)?.analysisPath === "guided"
             ? "Guided Analysis: Pure facts from answered questions (Path 1)"
-            : sanitizedAnalysis.analyzedScenarios?.analysisPath === "hybrid"
+            : (sanitizedAnalysis.analyzedScenarios as any)?.analysisPath === "hybrid"
             ? "Hybrid Analysis: Facts + Intelligent Inference (Path 2)"
             : "Direct Analysis: Analyzed full requirement text (Path 3)",
       },
