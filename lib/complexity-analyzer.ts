@@ -1102,13 +1102,15 @@ function createDescriptiveNodes(requirementText: string, targetNodeCount: number
     });
   }
 
-  // Fill remaining slots with generic components only as last resort
+  // Fill remaining slots with contextual fallback names (never generic Component_X)
   const remainingSlots = Math.max(1, targetNodeCount - nodes.length - 1);
   if (remainingSlots > 0) {
-    console.warn(`⚠️ Using ${remainingSlots} generic component placeholders - couldn't extract enough specific components`);
-    for (let i = 0; i < remainingSlots; i++) {
-      nodes.push(`Component_${i + 1}`);
-    }
+    const contextualComponents = generateContextualComponents(requirementText, remainingSlots);
+    // Count existing components to continue numbering
+    const lastComponentNum = nodes.filter(n => n.startsWith("C")).length;
+    contextualComponents.forEach((component, idx) => {
+      nodes.push(`C${lastComponentNum + idx + 1}: ${component}`);
+    });
   }
 
   // Add End node
