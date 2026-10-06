@@ -1147,6 +1147,149 @@ function createDescriptiveEdges(nodes: string[], estimatedEdgeCount: number): Ar
   return edges.slice(0, estimatedEdgeCount);
 }
 
+function extractMeaningfulDecisionPoints(requirementText: string, maxDecisions: number): string[] {
+  // Extract ACTUAL decision scenarios from requirement text, not generic placeholders
+  const decisions: string[] = [];
+  const text = requirementText.toLowerCase();
+
+  // Domain-specific decision patterns
+  const decisionPatterns = [
+    // E-commerce patterns
+    {
+      keywords: ["out of stock", "stock", "inventory"],
+      decisions: [
+        "Decide: Product goes out of stock while in cart → Remove item + notify OR Hold for restock?",
+        "Decide: Inventory count critical → Allow overselling OR Prevent purchase?",
+        "Decide: Stock level low → Display warning OR Auto-cancel order?"
+      ]
+    },
+    {
+      keywords: ["payment", "decline", "fail"],
+      decisions: [
+        "Decide: Payment declined → Retry option OR Immediate cancellation?",
+        "Decide: Payment gateway timeout → Queue for retry OR Fail transaction?",
+        "Decide: Fraud detected → Block transaction OR Manual review?"
+      ]
+    },
+    {
+      keywords: ["address", "validation", "shipping"],
+      decisions: [
+        "Decide: Address validation fails → Allow manual entry OR Reject?",
+        "Decide: Multiple address formats → Auto-correct OR Require confirmation?",
+        "Decide: Shipping address same as billing → Confirm OR Assume same?"
+      ]
+    },
+    {
+      keywords: ["discount", "coupon", "promo"],
+      decisions: [
+        "Decide: Multiple coupons applied → Sum discounts OR Use highest?",
+        "Decide: Coupon expired → Reject silently OR Show warning?",
+        "Decide: Maximum discount reached → Stack OR Cap at limit?"
+      ]
+    },
+    {
+      keywords: ["tax", "vat"],
+      decisions: [
+        "Decide: Tax calculation → By shipping address OR Billing address?",
+        "Decide: Tax-exempt customer → Require documentation OR Trust declaration?",
+        "Decide: International shipment → Include VAT OR Exclude?"
+      ]
+    },
+    {
+      keywords: ["order", "modif", "cancel"],
+      decisions: [
+        "Decide: Order modification after placement → Allow within window OR Disallow?",
+        "Decide: Cancellation request → Refund immediately OR Process return first?",
+        "Decide: Partial order cancel → Process OR Reject all-or-nothing?"
+      ]
+    },
+    {
+      keywords: ["currency", "exchange"],
+      decisions: [
+        "Decide: Multiple currencies → Real-time conversion OR Fixed rates?",
+        "Decide: Currency mismatch → Auto-convert OR Ask customer?"
+      ]
+    },
+    {
+      keywords: ["account", "user", "login"],
+      decisions: [
+        "Decide: Guest checkout → Allow OR Require account?",
+        "Decide: Account exists → Login OR Create new?",
+        "Decide: Password reset → Email link OR Security questions?"
+      ]
+    },
+    {
+      keywords: ["notification", "email", "alert"],
+      decisions: [
+        "Decide: Delivery failure → Retry sending OR Mark failed?",
+        "Decide: Newsletter opt-in → Default yes OR Default no?",
+        "Decide: Notification preferences → Store OR Request each time?"
+      ]
+    },
+    {
+      keywords: ["review", "rating", "feedback"],
+      decisions: [
+        "Decide: Product reviews → Publish immediately OR Moderate first?",
+        "Decide: Rating extremes → Flag as spam OR Allow?",
+        "Decide: Verified purchase → Required for reviews OR Optional?"
+      ]
+    },
+    // Audit patterns
+    {
+      keywords: ["audit", "delay", "late"],
+      decisions: [
+        "Decide: Audit delayed → Escalate immediately OR Wait for threshold?",
+        "Decide: Team unavailable → Auto-reassign OR Manual review?",
+        "Decide: Deadline approaching → Alert OR Auto-hold?"
+      ]
+    },
+    // Law firm patterns
+    {
+      keywords: ["law", "case", "billing"],
+      decisions: [
+        "Decide: Case unprofitable → Require approval OR Auto-reject?",
+        "Decide: Billing dispute → Hold payment OR Process on hold?",
+        "Decide: Write-off request → Auto-approve OR Require partner review?"
+      ]
+    }
+  ];
+
+  // Match patterns and extract relevant decisions
+  const extractedDecisions = new Set<string>();
+
+  decisionPatterns.forEach(pattern => {
+    const hasPattern = pattern.keywords.some(kw => text.includes(kw));
+    if (hasPattern) {
+      pattern.decisions.forEach(decision => {
+        extractedDecisions.add(decision);
+      });
+    }
+  });
+
+  // Convert to array and limit
+  const decisionArray = Array.from(extractedDecisions);
+
+  // If not enough decisions from patterns, add generic scenario-based decisions
+  if (decisionArray.length < maxDecisions) {
+    const genericDecisions = [
+      "Decide: Data validation → Strict OR Lenient?",
+      "Decide: Error handling → User-friendly message OR Technical details?",
+      "Decide: Timeout → Retry OR Fail immediately?",
+      "Decide: Concurrent requests → Queue OR Reject?",
+      "Decide: Fallback behavior → Graceful degradation OR Complete failure?",
+      "Decide: Caching strategy → Cache aggressively OR Always fresh?",
+      "Decide: Rate limiting → Strict OR Permissive?",
+      "Decide: Logging level → Verbose OR Minimal?"
+    ];
+
+    for (let i = 0; i < maxDecisions - decisionArray.length && i < genericDecisions.length; i++) {
+      decisionArray.push(genericDecisions[i]);
+    }
+  }
+
+  return decisionArray.slice(0, maxDecisions);
+}
+
 function createFallbackAnalysis(
   requirementText: string = "",
   analysisPath?: "guided" | "hybrid" | "direct",
@@ -1207,10 +1350,15 @@ function createFallbackAnalysis(
     paths.push(path);
   }
 
-  // Extract decision points from nodes that sound like decision points
-  const decisionPoints = nodes
-    .filter(n => n.includes("Decision") || n.includes("Check") || n.includes("Verify"))
-    .slice(0, Math.min(estimate.estimatedPaths - 1, 10));
+  // Extract meaningful decision points from requirement text (NOT generic placeholders)
+  const extractedDecisionPoints = extractMeaningfulDecisionPoints(requirementText, Math.min(estimate.estimatedPaths - 1, 10));
+
+  // Fallback: filter nodes if no decision points extracted
+  const decisionPoints = extractedDecisionPoints.length > 0
+    ? extractedDecisionPoints
+    : nodes
+        .filter(n => n.includes("Decision") || n.includes("Check") || n.includes("Verify"))
+        .slice(0, Math.min(estimate.estimatedPaths - 1, 10));
 
   return {
     nodes,
@@ -1224,10 +1372,7 @@ function createFallbackAnalysis(
     analysis: `Intelligent fallback analysis based on requirement text characteristics.
     Identified ${estimate.estimatedNodes} components with ${estimate.estimatedEdges} interactions.
     Estimated complexity reflects requirement features, actors, flows, and conditionals.`,
-    decisionPoints: decisionPoints.length > 0 ? decisionPoints : Array.from(
-      { length: Math.min(estimate.estimatedPaths - 1, 10) },
-      (_, i) => `Decision_${i + 1}`
-    ),
+    decisionPoints: decisionPoints.length > 0 ? decisionPoints : extractedDecisionPoints,
     alternativePaths: estimate.estimatedPaths,
     reasoning: estimate.reasoning,
     confidenceScore: estimate.adjustedConfidence, // Use analysis-path-aware confidence
