@@ -907,30 +907,77 @@ function extractActorsFromRequirement(requirementText: string): string[] {
   return actors;
 }
 
+function extractSystemComponents(requirementText: string): string[] {
+  // Extract meaningful system/module names from requirement text
+  const components: string[] = [];
+
+  // Map of keywords to component descriptions
+  const keywordMap = [
+    { keywords: ["notif", "alert", "email", "sms"], name: "Notification System" },
+    { keywords: ["report", "dashboard", "display", "view"], name: "Reporting & Dashboard" },
+    { keywords: ["approval", "review", "verify", "validate"], name: "Approval Workflow" },
+    { keywords: ["database", "storage", "persist", "record"], name: "Data Storage Layer" },
+    { keywords: ["reassign", "delegate", "transfer", "move"], name: "Task Reassignment" },
+    { keywords: ["schedule", "calendar", "time", "date"], name: "Scheduling Engine" },
+    { keywords: ["delay", "late", "overdue", "timeout"], name: "Delay Detection" },
+    { keywords: ["integration", "connect", "sync", "api"], name: "Integration Module" },
+    { keywords: ["permission", "access", "role", "auth"], name: "Access Control" },
+    { keywords: ["track", "monitor", "trace", "log"], name: "Tracking & Monitoring" },
+    { keywords: ["escalat", "priority", "urgent", "critical"], name: "Escalation Engine" },
+    { keywords: ["trend", "analytic", "insight", "metric"], name: "Analytics Engine" },
+  ];
+
+  // Find which keywords exist in the requirement
+  keywordMap.forEach(({ keywords, name }) => {
+    const found = keywords.some(kw =>
+      requirementText.toLowerCase().includes(kw)
+    );
+    if (found) {
+      components.push(name);
+    }
+  });
+
+  // Remove duplicates and limit to reasonable number
+  return Array.from(new Set(components)).slice(0, 15);
+}
+
 function createDescriptiveNodes(requirementText: string, targetNodeCount: number): string[] {
   const nodes: string[] = ["Start"];
 
   // Extract components from main flow
   const flowComponents = extractMainFlowComponents(requirementText);
   const actors = extractActorsFromRequirement(requirementText);
+  const systemComponents = extractSystemComponents(requirementText);
 
-  // Use extracted components first
+  // Use extracted flow components first
   if (flowComponents.length > 0) {
-    nodes.push(...flowComponents.slice(0, Math.max(1, targetNodeCount - 4)));
+    const flowToAdd = Math.min(flowComponents.length, Math.max(1, targetNodeCount - 6));
+    nodes.push(...flowComponents.slice(0, flowToAdd));
   }
 
   // Add actors if we need more nodes and have room
-  if (nodes.length < targetNodeCount - 1 && actors.length > 0) {
-    const actorNodesToAdd = Math.min(actors.length, Math.max(1, targetNodeCount - nodes.length - 1));
+  if (nodes.length < targetNodeCount - 3 && actors.length > 0) {
+    const actorNodesToAdd = Math.min(actors.length, Math.max(1, targetNodeCount - nodes.length - 3));
     actors.slice(0, actorNodesToAdd).forEach((actor, idx) => {
       nodes.push(`A${idx + 1}: ${actor}`);
     });
   }
 
-  // Fill remaining slots with generic components if needed
+  // Add system components extracted from keywords
+  if (nodes.length < targetNodeCount - 1 && systemComponents.length > 0) {
+    const componentsToAdd = Math.min(systemComponents.length, Math.max(1, targetNodeCount - nodes.length - 1));
+    systemComponents.slice(0, componentsToAdd).forEach((component, idx) => {
+      nodes.push(`C${idx + 1}: ${component}`);
+    });
+  }
+
+  // Fill remaining slots with generic components only as last resort
   const remainingSlots = Math.max(1, targetNodeCount - nodes.length - 1);
-  for (let i = 0; i < remainingSlots; i++) {
-    nodes.push(`Component_${i + 1}`);
+  if (remainingSlots > 0) {
+    console.warn(`⚠️ Using ${remainingSlots} generic component placeholders - couldn't extract enough specific components`);
+    for (let i = 0; i < remainingSlots; i++) {
+      nodes.push(`Component_${i + 1}`);
+    }
   }
 
   // Add End node
