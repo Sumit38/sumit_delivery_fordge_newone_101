@@ -908,37 +908,168 @@ function extractActorsFromRequirement(requirementText: string): string[] {
 }
 
 function extractSystemComponents(requirementText: string): string[] {
-  // Extract meaningful system/module names from requirement text
   const components: string[] = [];
+  const text = requirementText.toLowerCase();
 
-  // Map of keywords to component descriptions
+  // EXPANDED: 30+ component types for comprehensive coverage
   const keywordMap = [
-    { keywords: ["notif", "alert", "email", "sms"], name: "Notification System" },
-    { keywords: ["report", "dashboard", "display", "view"], name: "Reporting & Dashboard" },
-    { keywords: ["approval", "review", "verify", "validate"], name: "Approval Workflow" },
-    { keywords: ["database", "storage", "persist", "record"], name: "Data Storage Layer" },
-    { keywords: ["reassign", "delegate", "transfer", "move"], name: "Task Reassignment" },
-    { keywords: ["schedule", "calendar", "time", "date"], name: "Scheduling Engine" },
-    { keywords: ["delay", "late", "overdue", "timeout"], name: "Delay Detection" },
-    { keywords: ["integration", "connect", "sync", "api"], name: "Integration Module" },
-    { keywords: ["permission", "access", "role", "auth"], name: "Access Control" },
-    { keywords: ["track", "monitor", "trace", "log"], name: "Tracking & Monitoring" },
-    { keywords: ["escalat", "priority", "urgent", "critical"], name: "Escalation Engine" },
-    { keywords: ["trend", "analytic", "insight", "metric"], name: "Analytics Engine" },
+    // Core Operations
+    { keywords: ["notif", "alert", "email", "sms", "message"], name: "Notification System" },
+    { keywords: ["report", "dashboard", "display", "view", "visual"], name: "Reporting & Dashboard" },
+    { keywords: ["approval", "review", "verify", "validate", "approval"], name: "Approval Workflow" },
+    { keywords: ["database", "storage", "persist", "record", "data store"], name: "Data Storage Layer" },
+    { keywords: ["reassign", "delegate", "transfer", "move", "handoff"], name: "Task Reassignment" },
+    { keywords: ["schedule", "calendar", "time", "date", "timeline"], name: "Scheduling Engine" },
+    { keywords: ["delay", "late", "overdue", "timeout", "latency"], name: "Delay Detection" },
+    { keywords: ["integration", "connect", "sync", "api", "third-party"], name: "Integration Module" },
+    { keywords: ["permission", "access", "role", "auth", "credential"], name: "Access Control" },
+    { keywords: ["track", "monitor", "trace", "log", "follow"], name: "Tracking & Monitoring" },
+    { keywords: ["escalat", "priority", "urgent", "critical", "escalation"], name: "Escalation Engine" },
+    { keywords: ["trend", "analytic", "insight", "metric", "analysis"], name: "Analytics Engine" },
+
+    // Business/Domain Specific
+    { keywords: ["billing", "invoice", "payment", "charge", "fee"], name: "Billing & Payment Module" },
+    { keywords: ["profit", "revenue", "cost", "expense", "financial"], name: "Financial Analytics" },
+    { keywords: ["budget", "forecast", "projection", "estimate", "planning"], name: "Forecasting & Budgeting" },
+    { keywords: ["allocation", "distribute", "apportion", "split", "proportion"], name: "Cost Allocation Engine" },
+    { keywords: ["audit", "compliance", "regulatory", "regulation", "audit trail"], name: "Audit & Compliance" },
+    { keywords: ["workflow", "process", "procedure", "step", "flow"], name: "Process Workflow" },
+    { keywords: ["qualit", "qc", "check", "validation", "quality"], name: "Quality Assurance" },
+    { keywords: ["user", "person", "profile", "account", "user manage"], name: "User Management" },
+    { keywords: ["communication", "message", "chat", "collaborate", "discussion"], name: "Communication Hub" },
+    { keywords: ["document", "file", "attachment", "content", "manage"], name: "Document Management" },
+    { keywords: ["search", "filter", "query", "find", "lookup"], name: "Search & Query Engine" },
+    { keywords: ["template", "form", "config", "setup", "configuration"], name: "Configuration Manager" },
+    { keywords: ["export", "import", "upload", "download", "transfer"], name: "Data Import/Export" },
+    { keywords: ["historical", "archive", "retention", "backup", "history"], name: "Archive & History" },
+    { keywords: ["compare", "benchmark", "compare", "contrast", "analysis"], name: "Comparative Analysis" },
+    { keywords: ["dispute", "issue", "problem", "error", "adjustment"], name: "Dispute Resolution" },
+    { keywords: ["performance", "metric", "kpi", "measurement", "rating"], name: "Performance Metrics" },
+    { keywords: ["security", "encrypt", "secure", "protect", "token"], name: "Security & Encryption" },
   ];
 
-  // Find which keywords exist in the requirement
+  // Extract from keywords (primary method)
   keywordMap.forEach(({ keywords, name }) => {
-    const found = keywords.some(kw =>
-      requirementText.toLowerCase().includes(kw)
-    );
+    const found = keywords.some(kw => text.includes(kw));
     if (found) {
       components.push(name);
     }
   });
 
-  // Remove duplicates and limit to reasonable number
-  return Array.from(new Set(components)).slice(0, 15);
+  // SECONDARY: Extract domain-specific concepts from requirement context
+  const conceptExtractedComponents = extractConceptBasedComponents(requirementText);
+  components.push(...conceptExtractedComponents);
+
+  // Remove duplicates and maintain order
+  const uniqueComponents = Array.from(new Set(components));
+
+  // If still short on components, add contextual names based on domain
+  if (uniqueComponents.length < 5) {
+    uniqueComponents.push(...generateContextualComponents(requirementText, 5 - uniqueComponents.length));
+  }
+
+  return uniqueComponents.slice(0, 20);
+}
+
+function extractConceptBasedComponents(requirementText: string): string[] {
+  // Extract components based on domain concepts, not just keywords
+  const components: string[] = [];
+  const text = requirementText.toLowerCase();
+
+  // Legal/Finance domain
+  if (text.includes("law firm") || text.includes("case") || text.includes("attorney")) {
+    if (text.includes("bill") || text.includes("invoice") || text.includes("fee")) {
+      components.push("Billing & Payment Module");
+    }
+    if (text.includes("profit") || text.includes("revenue") || text.includes("cost")) {
+      components.push("Financial Analytics");
+    }
+    if (text.includes("time track") || text.includes("hourly")) {
+      components.push("Time Tracking System");
+    }
+  }
+
+  // Audit domain
+  if (text.includes("audit")) {
+    if (text.includes("schedule") && !components.some(c => c.includes("Scheduling"))) {
+      components.push("Audit Scheduling Module");
+    }
+    if (text.includes("compliance") || text.includes("regulatory")) {
+      components.push("Compliance Monitoring");
+    }
+  }
+
+  // Project/Task domain
+  if (text.includes("project") || text.includes("task")) {
+    if (text.includes("resource") || text.includes("allocation")) {
+      components.push("Resource Allocation");
+    }
+  }
+
+  return components;
+}
+
+function generateContextualComponents(requirementText: string, needed: number): string[] {
+  // Generate intelligent fallback names based on requirement domain
+  const components: string[] = [];
+  const text = requirementText.toLowerCase();
+
+  // Domain detection
+  const isLegal = text.includes("law firm") || text.includes("attorney") || text.includes("case");
+  const isAudit = text.includes("audit");
+  const isFinance = text.includes("finance") || text.includes("banking") || text.includes("accounting");
+  const isProject = text.includes("project") || text.includes("task");
+  const isHR = text.includes("employee") || text.includes("hr") || text.includes("human");
+
+  if (isLegal) {
+    const legalComponents = [
+      "Case Management System",
+      "Client Communication Portal",
+      "Evidence Tracking",
+      "Legal Document Repository",
+      "Matter Status Board"
+    ];
+    components.push(...legalComponents.slice(0, needed));
+  } else if (isAudit) {
+    const auditComponents = [
+      "Audit Evidence Management",
+      "Finding Tracking System",
+      "Risk Assessment Module",
+      "Audit Report Generator",
+      "Compliance Dashboard"
+    ];
+    components.push(...auditComponents.slice(0, needed));
+  } else if (isFinance) {
+    const financeComponents = [
+      "Ledger Management",
+      "Reconciliation Engine",
+      "Cash Flow Projections",
+      "Asset Tracking",
+      "Variance Analysis"
+    ];
+    components.push(...financeComponents.slice(0, needed));
+  } else if (isHR) {
+    const hrComponents = [
+      "Payroll Processing",
+      "Leave Management",
+      "Performance Tracking",
+      "Recruitment Pipeline",
+      "Employee Directory"
+    ];
+    components.push(...hrComponents.slice(0, needed));
+  } else {
+    // Generic fallback for unknown domains
+    const genericComponents = [
+      "Data Processing Engine",
+      "Business Logic Layer",
+      "Service Integration",
+      "Utility Services",
+      "Helper Modules"
+    ];
+    components.push(...genericComponents.slice(0, needed));
+  }
+
+  return components.slice(0, needed);
 }
 
 function createDescriptiveNodes(requirementText: string, targetNodeCount: number): string[] {
