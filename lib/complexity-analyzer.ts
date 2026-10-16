@@ -224,12 +224,11 @@ STEP-BY-STEP INSTRUCTIONS:
    - List Start node
    - List each state, decision point, process step, or condition check
    - List End node
-   - For each node, briefly explain why it's a node
+   - Give each node a short label only (no explanations)
 
 2. IDENTIFY ALL EDGES (transitions/flows):
-   - For each transition between nodes, describe the condition/trigger
+   - For each transition, give a short condition label only
    - Include success paths, failure paths, error handling, retries, loops
-   - For each edge, explain what triggers this transition
 
 3. TRACE ALL DISTINCT PATHS:
    - List every unique route from Start to End
@@ -244,7 +243,7 @@ STEP-BY-STEP INSTRUCTIONS:
 Output in this format:
 
 REASONING:
-[Detailed explanation of how you identified nodes, edges, and paths. Include any assumptions or complexities found.]
+[One short paragraph, at most 3 sentences.]
 
 NODES:
 - Start
@@ -298,7 +297,7 @@ M = E - N + 2P = [number]`,
     if (edgesMatch) {
       const edgeLines = edgesMatch[1].split("\n");
       edgeLines.forEach((line) => {
-        const cleaned = line.replace(/^[-•]\s*/, "").trim();
+        const cleaned = line.replace(/^[-•*]\s*/, "").replace(/\*\*/g, "").replace(/→/g, "->").trim();
         const edgeRegex = /^(.*?)\s*->\s*(.+?)(?:\s*\((.+?)\))?$/;
         const match = cleaned.match(edgeRegex);
         if (match) {
