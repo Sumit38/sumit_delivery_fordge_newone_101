@@ -1290,6 +1290,71 @@ function extractMeaningfulDecisionPoints(requirementText: string, maxDecisions: 
   return decisionArray.slice(0, maxDecisions);
 }
 
+const MAX_FALLBACK_PATHS = 32;
+const FALLBACK_CONFIDENCE_CAP = 60;
+
+function buildFallbackGraph(nodes: string[], requestedPaths: number) {
+  const edges = createDescriptiveEdges(nodes, Number.MAX_SAFE_INTEGER);
+
+  const bypassBudget = Math.min(
+    Math.floor(Math.log2(Math.max(requestedPaths, 1))),
+    Math.floor(Math.log2(MAX_FALLBACK_PATHS))
+  );
+  let added = 0;
+  for (let j = 1; j + 2 < nodes.length - 1 && added < bypassBudget; j += 2) {
+    edges.push({ from: nodes[j], to: nodes[j + 2], condition: "decision_branch" });
+    added++;
+  }
+
+  const seen = new Set<string>();
+  const uniqueEdges = edges.filter((e) => {
+    const key = `${e.from}→${e.to}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return {
+    edges: uniqueEdges,
+    paths: enumerateForwardPaths(nodes, uniqueEdges, MAX_FALLBACK_PATHS),
+  };
+}
+
+function enumerateForwardPaths(
+  nodes: string[],
+  edges: Array<{ from: string; to: string; condition: string }>,
+  cap: number
+): string[][] {
+  const forward = new Map<string, string[]>();
+  for (const edge of edges) {
+    if (edge.condition === "alternate_flow") continue;
+    const targets = forward.get(edge.from) ?? [];
+    targets.push(edge.to);
+    forward.set(edge.from, targets);
+  }
+
+  const start = nodes[0];
+  const end = nodes[nodes.length - 1];
+  const paths: string[][] = [];
+
+  const walk = (node: string, path: string[]) => {
+    if (paths.length >= cap) return;
+    if (node === end) {
+      paths.push([...path]);
+      return;
+    }
+    for (const next of forward.get(node) ?? []) {
+      if (path.includes(next)) continue;
+      path.push(next);
+      walk(next, path);
+      path.pop();
+    }
+  };
+
+  walk(start, [start]);
+  return paths.length > 0 ? paths : [[start, end]];
+}
+
 function createFallbackAnalysis(
   requirementText: string = "",
   analysisPath?: "guided" | "hybrid" | "direct",
@@ -1334,24 +1399,13 @@ function createFallbackAnalysis(
   // Build descriptive nodes from requirement text instead of generic placeholders
   const nodes = createDescriptiveNodes(requirementText, estimate.estimatedNodes);
 
-  // Build descriptive edges
-  const edges = createDescriptiveEdges(nodes, estimate.estimatedEdges);
+  const { edges, paths } = buildFallbackGraph(nodes, estimate.estimatedPaths);
+  const nodeCount = new Set(nodes).size;
+  const edgeCount = edges.length;
+  const pathCount = paths.length;
+  const complexity = edgeCount - nodeCount + 2 * pathCount;
 
-  // Build paths
-  const paths: string[][] = [];
-  for (let p = 0; p < Math.min(estimate.estimatedPaths, 5); p++) {
-    const path = [nodes[0]];
-    for (let i = 1; i < nodes.length - 1; i++) {
-      if (Math.random() > 0.3 || p === 0) { // Ensure at least one complete path
-        path.push(nodes[i]);
-      }
-    }
-    path.push(nodes[nodes.length - 1]);
-    paths.push(path);
-  }
-
-  // Extract meaningful decision points from requirement text (NOT generic placeholders)
-  const extractedDecisionPoints = extractMeaningfulDecisionPoints(requirementText, Math.min(estimate.estimatedPaths - 1, 10));
+  const extractedDecisionPoints = extractMeaningfulDecisionPoints(requirementText, Math.min(Math.max(pathCount - 1, 1), 10));
 
   // Fallback: filter nodes if no decision points extracted
   const decisionPoints = extractedDecisionPoints.length > 0
@@ -1360,41 +1414,27 @@ function createFallbackAnalysis(
         .filter(n => n.includes("Decision") || n.includes("Check") || n.includes("Verify"))
         .slice(0, Math.min(estimate.estimatedPaths - 1, 10));
 
+  const fallbackConfidence = Math.min(estimate.adjustedConfidence, FALLBACK_CONFIDENCE_CAP);
+  const qaCoverage = Math.round(((answeredQuestionsCount ?? 0) / 15) * 100);
+
   return {
     nodes,
-    edges: edges.slice(0, estimate.estimatedEdges), // Limit to estimated edge count
+    edges,
     paths,
-    nodesCount: estimate.estimatedNodes,
-    edgesCount: estimate.estimatedEdges,
+    nodesCount: nodeCount,
+    edgesCount: edgeCount,
     connectedComponents: 1,
-    complexityScore: estimate.estimatedComplexity,
-    testScenarios: Math.max(2 * estimate.estimatedPaths, 2),
-    analysis: `Intelligent fallback analysis based on requirement text characteristics.
-    Identified ${estimate.estimatedNodes} components with ${estimate.estimatedEdges} interactions.
-    Estimated complexity reflects requirement features, actors, flows, and conditionals.`,
+    complexityScore: complexity,
+    testScenarios: Math.max(2 * pathCount, 2),
+    analysis: `ESTIMATE (primary analysis unavailable). N=${nodeCount}, E=${edgeCount} and P=${pathCount} are counted from a graph generated from the requirement text, so treat this score as indicative and validate it before relying on it.`,
     decisionPoints: decisionPoints.length > 0 ? decisionPoints : extractedDecisionPoints,
-    alternativePaths: estimate.estimatedPaths,
-    reasoning: estimate.reasoning,
-    confidenceScore: estimate.adjustedConfidence, // Use analysis-path-aware confidence
-    confidenceReason: `${
-      analysisPath === "guided"
-        ? `GUIDED PATH: Complete Analysis with Full Q&A Coverage
-   Questions Answered: ${answeredQuestionsCount}/15 (${Math.round(((answeredQuestionsCount ?? 0) / 15) * 100)}% coverage)
-   Methodology: Multi-layered analysis using AI review combined with requirement questionnaire validation
-   Quality Assurance: Dual-validated through multiple verification methods for enhanced accuracy
-   Confidence Level: ${estimate.adjustedConfidence}%`
-        : analysisPath === "hybrid"
-        ? `HYBRID PATH: Comprehensive Analysis with Partial Q&A Coverage
-   Questions Answered: ${answeredQuestionsCount}/15 (${coveragePercentage ?? Math.round(((answeredQuestionsCount ?? 0) / 15) * 100)}% coverage)
-   Analysis Method: AI-driven analysis combined with intelligent inference from requirement text
-   Quality Assurance: Cross-validated using both structured Q&A and textual analysis
-   Confidence Level: ${estimate.adjustedConfidence}%`
-        : `DIRECT PATH: Requirement Text Analysis
-   Analysis Method: Detailed requirement text examination with complexity indicator detection
-   Coverage: Text-based analysis (${requirementText.length} characters analyzed)
-   Quality Assurance: Estimated from requirement characteristics and structural analysis
-   Confidence Level: ${estimate.adjustedConfidence}%`
-    }`,
+    alternativePaths: pathCount,
+    reasoning: `Fallback estimate. Counts come from the generated graph: N=${nodeCount}, E=${edgeCount}, P=${pathCount} distinct Start-to-End paths. M = E - N + 2P = ${complexity}.`,
+    confidenceScore: fallbackConfidence,
+    confidenceReason: `ESTIMATE: primary analysis was unavailable.
+   Questions answered: ${answeredQuestionsCount ?? 0}/15 (${coveragePercentage ?? qaCoverage}% coverage, path: ${analysisPath ?? "unknown"})
+   Method: graph generated from requirement text; counts are derived from that graph, not from a validated AI analysis.
+   Confidence Level: ${fallbackConfidence}% (capped for estimates)`,
   };
 }
 
