@@ -121,9 +121,9 @@ export async function POST(request: NextRequest) {
         // Add timeout handling for Claude API
         const analysisPromise = analyzeRequirementComplexity(requirementText, questionsMetadata);
 
-        // Set a 55-second timeout (leaving room for Vercel's 5-minute limit)
+        // Vercel Hobby functions stop at 60s, so the whole request must finish inside that window
         const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Analysis timeout - Claude API took too long")), 55000)
+          setTimeout(() => reject(new Error("Analysis timeout - Claude API took too long")), 50000)
         );
 
         analysis = await Promise.race([analysisPromise, timeoutPromise]);
@@ -136,7 +136,6 @@ export async function POST(request: NextRequest) {
         const isNetworkError =
           analysisError?.message?.includes("HTTP2") ||
           analysisError?.message?.includes("ERR_") ||
-          analysisError?.message?.includes("timeout") ||
           analysisError?.message?.includes("ECONNRESET") ||
           analysisError?.message?.includes("EPIPE");
 
