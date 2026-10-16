@@ -1432,7 +1432,7 @@ function createFallbackAnalysis(
     reasoning: `Fallback estimate. Counts come from the generated graph: N=${nodeCount}, E=${edgeCount}, P=${pathCount} distinct Start-to-End paths. M = E - N + 2P = ${complexity}.`,
     confidenceScore: fallbackConfidence,
     confidenceReason: `ESTIMATE: primary analysis was unavailable.
-   Questions answered: ${answeredQuestionsCount ?? 0}/15 (${coveragePercentage ?? qaCoverage}% coverage, path: ${analysisPath ?? "unknown"})
+   Questions answered: ${answeredQuestionsCount ?? 0}/15 (${qaCoverage}% coverage, path: ${analysisPath ?? "unknown"})
    Method: graph generated from requirement text; counts are derived from that graph, not from a validated AI analysis.
    Confidence Level: ${fallbackConfidence}% (capped for estimates)`,
   };
