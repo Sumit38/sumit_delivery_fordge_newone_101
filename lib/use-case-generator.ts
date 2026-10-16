@@ -1,3 +1,5 @@
+import { authFetch } from "@/lib/auth-fetch";
+
 interface UseCaseData {
   requirementTitle: string;
   requirementText: string;
@@ -289,7 +291,7 @@ export async function generateUseCasePDF(data: UseCaseData): Promise<void> {
   sessionStorage.removeItem(cacheKey);
 
   try {
-    const response = await fetch("/api/generate-use-case-qa", {
+    const response = await authFetch("/api/generate-use-case-qa", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
