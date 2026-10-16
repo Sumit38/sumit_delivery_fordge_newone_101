@@ -168,7 +168,7 @@ export async function analyzeRequirementComplexity(
 
     // Combine answered + inferred for analysis
     const allAnalyzedQuestions = [...answeredQuestions, ...inferredQuestions];
-    const totalAnalyzed = allAnalyzedQuestions.length;
+    const totalAnalyzed = answeredCount + inferredQuestions.length;
     const coveragePercentage = Math.round((totalAnalyzed / totalQuestions) * 100);
 
     // ✅ Log what will be passed to fallback for debugging
@@ -185,6 +185,11 @@ export async function analyzeRequirementComplexity(
         console.log(`   Q${q.questionNumber}: ✓ ${type} - "${q.question}"`);
       });
     }
+
+    const remainingQuestions = questionsMetadata
+      ?.filter(q => !q.isAnswered && !inferredQuestions.some(iq => iq.questionNumber === q.questionNumber))
+      .map(q => `- Q${q.questionNumber}: ${q.question}`)
+      .join('\n') || 'None';
 
     const response = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
@@ -207,16 +212,19 @@ ${allAnalyzedQuestions
   })
   .join('\n')}
 
+${analysispath === "hybrid" ? `
+UNANSWERED SCENARIOS (infer from the requirement text):
+${remainingQuestions}
+
+For each unanswered scenario, infer the most likely answer from the requirement text. Include nodes, edges and paths for an unanswered scenario only when the text supports it, and label those elements INFERRED in the analysis. Do not invent scenarios the text does not support. The complexity must reflect the analyzed and inferred scenarios.
+` : `
 SKIPPED SCENARIOS (NOT analyzed - DO NOT EXTRACT PATHS FOR THESE):
-${questionsMetadata
-  ?.filter(q => !q.isAnswered && !inferredQuestions.some(iq => iq.questionNumber === q.questionNumber))
-  .map(q => `- Q${q.questionNumber}: ${q.question}`)
-  .join('\n') || 'None'}
+${remainingQuestions}
 
 CRITICAL INSTRUCTION: Extract nodes, edges, and paths ONLY for the analyzed scenarios above.
 For INFERRED scenarios, extract based on context. Do NOT guess or hallucinate paths for
 truly skipped questions. The complexity must reflect only the analyzed scenarios.
-` : ''}
+`}` : ''}
 
 STEP-BY-STEP INSTRUCTIONS:
 
@@ -298,7 +306,7 @@ M = E - N + 2P = [number]`,
     if (edgesMatch) {
       const edgeLines = edgesMatch[1].split("\n");
       edgeLines.forEach((line) => {
-        const cleaned = line.replace(/^[-•]\s*/, "").trim();
+        const cleaned = line.replace(/^[-•*]\s*/, "").replace(/\*\*/g, "").replace(/→/g, "->").trim();
         const edgeRegex = /^(.*?)\s*->\s*(.+?)(?:\s*\((.+?)\))?$/;
         const match = cleaned.match(edgeRegex);
         if (match) {
@@ -1432,7 +1440,7 @@ function createFallbackAnalysis(
     reasoning: `Fallback estimate. Counts come from the generated graph: N=${nodeCount}, E=${edgeCount}, P=${pathCount} distinct Start-to-End paths. M = E - N + 2P = ${complexity}.`,
     confidenceScore: fallbackConfidence,
     confidenceReason: `ESTIMATE: primary analysis was unavailable.
-   Questions answered: ${answeredQuestionsCount ?? 0}/15 (${coveragePercentage ?? qaCoverage}% coverage, path: ${analysisPath ?? "unknown"})
+   Questions answered: ${answeredQuestionsCount ?? 0}/15 (${qaCoverage}% coverage, path: ${analysisPath ?? "unknown"})
    Method: graph generated from requirement text; counts are derived from that graph, not from a validated AI analysis.
    Confidence Level: ${fallbackConfidence}% (capped for estimates)`,
   };
