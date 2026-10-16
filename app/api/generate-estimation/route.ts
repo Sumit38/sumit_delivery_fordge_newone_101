@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireUser } from "@/lib/require-user";
+import { checkRateLimit } from "@/lib/rate-limit";
 import { supabaseServer } from "@/lib/supabase-server";
 import { calculateEstimation } from "@/lib/estimation-calculator";
 
@@ -6,38 +8,12 @@ export async function POST(request: NextRequest) {
   try {
     console.log("🔍 [1/4] Validating estimation request...");
 
-    // Get auth header
-    const authHeader = request.headers.get("authorization");
-    let userId: string | null = null;
+    const auth = await requireUser(request);
+    if (auth.error) return auth.error;
+    const userId = auth.userId;
 
-    try {
-      const token = authHeader?.replace("Bearer ", "");
-      if (!token) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      }
-
-      const parts = token.split(".");
-      if (parts.length !== 3) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      }
-
-      const decoded = JSON.parse(
-        Buffer.from(parts[1], "base64").toString("utf-8")
-      );
-      userId = decoded.sub || null;
-
-      console.log("✅ [1/4] Auth success. UserId:", userId);
-    } catch (authError) {
-      console.error("⚠️ [1/4] Auth error:", authError);
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Unauthorized - please sign in" },
-        { status: 401 }
-      );
-    }
+    const limited = checkRateLimit(userId);
+    if (limited) return limited;
 
     // Parse request body
     console.log("🔍 [2/4] Parsing request body...");

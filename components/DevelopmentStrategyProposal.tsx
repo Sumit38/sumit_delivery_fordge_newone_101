@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { authFetch } from "@/lib/auth-fetch";
 
 interface DevStrategy {
   implementationApproach: { type: string; phases: string[]; rationale: string; releaseStrategy: string };
@@ -30,7 +31,7 @@ export default function DevelopmentStrategyProposal({ requirementText, devComple
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/generate-development-strategy", {
+      const response = await authFetch("/api/generate-development-strategy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requirementText, devComplexity }),

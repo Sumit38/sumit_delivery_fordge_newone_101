@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireUser } from "@/lib/require-user";
 
 export async function POST(request: NextRequest) {
+  const auth = await requireUser(request);
+  if (auth.error) return auth.error;
+
   // PDF extraction requires proper decompression + text extraction
   // (pdfjs-dist, pdf-parse, or similar libraries)
   // For now, direct users to extract text manually

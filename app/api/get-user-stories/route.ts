@@ -1,38 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
+import { requireUser } from "@/lib/require-user";
 
 export async function GET(request: NextRequest) {
   try {
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
+    const auth = await requireUser(request);
+    if (auth.error) return auth.error;
+    const userId = auth.userId;
 
-    if (!token) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
-    const parts = token.split(".");
-    if (parts.length !== 3) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
-    const decoded = JSON.parse(Buffer.from(parts[1], "base64").toString("utf-8"));
-    const userId = decoded.sub;
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
-    // Get all user stories for this user with requirement details
-    // After backfill, all stories should have requirement_id
     const { data, error } = await supabaseServer
       .from("user_stories")
       .select(
@@ -63,7 +38,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Transform data to include requirement title
     const transformedData = data?.map((story: any) => ({
       id: story.id,
       analysis_id: story.analysis_id,

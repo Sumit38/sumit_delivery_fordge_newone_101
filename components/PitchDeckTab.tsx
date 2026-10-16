@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { authFetch } from "@/lib/auth-fetch";
 import { supabase } from "@/lib/supabase";
 import { PitchDeckQuestionsForm } from "./PitchDeckQuestionsForm";
 
@@ -43,7 +44,7 @@ export function PitchDeckTab({
         throw new Error("Please sign in to generate pitch deck");
       }
 
-      const response = await fetch("/api/generate-pitch-deck", {
+      const response = await authFetch("/api/generate-pitch-deck", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -83,7 +84,7 @@ export function PitchDeckTab({
         throw new Error("Please sign in to download");
       }
 
-      const response = await fetch("/api/download-pitch-deck", {
+      const response = await authFetch("/api/download-pitch-deck", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

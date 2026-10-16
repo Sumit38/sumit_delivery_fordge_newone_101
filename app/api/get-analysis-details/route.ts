@@ -1,29 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
+import { requireUser } from "@/lib/require-user";
 
 export async function GET(request: NextRequest) {
   try {
-    // Get auth
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
+    const auth = await requireUser(request);
+    if (auth.error) return auth.error;
+    const userId = auth.userId;
 
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const parts = token.split(".");
-    if (parts.length !== 3) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const decoded = JSON.parse(Buffer.from(parts[1], "base64").toString("utf-8"));
-    const userId = decoded.sub;
-
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // Get requirement ID from query params
     const { searchParams } = new URL(request.url);
     const requirementId = searchParams.get("requirementId");
 
@@ -34,7 +18,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get requirement with full analysis
     const { data: requirement, error: reqError } = await supabaseServer
       .from("requirements")
       .select(
@@ -67,7 +50,6 @@ export async function GET(request: NextRequest) {
     const result = requirement.complexity_results[0];
     const analysisData = result.analysis_data || {};
 
-    // Build comprehensive analysis details
     const analysisDetails = {
       requirement: {
         id: requirement.id,

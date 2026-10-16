@@ -124,7 +124,7 @@ export async function analyzeRequirementComplexity(
 
     // ✅ CRITICAL FIX: Detect Q&A from requirement text if questionsMetadata is empty
     // This handles cases where Q&A is embedded in the requirement text
-    let answeredQuestions = questionsMetadata?.filter(q => q.isAnswered) || [];
+    const answeredQuestions = questionsMetadata?.filter(q => q.isAnswered) || [];
     let answeredCount = answeredQuestions.length;
 
     // If no metadata but text contains Q&A markers, detect from text
@@ -313,7 +313,7 @@ M = E - N + 2P = [number]`,
     }
 
     // Parse paths
-    let pathsList: string[][] = [];
+    const pathsList: string[][] = [];
     const pathsMatch = fullText.match(/PATHS:\s*([\s\S]*?)(?=CALCULATION:|$)/i);
     if (pathsMatch) {
       const pathLines = pathsMatch[1].split("\n");

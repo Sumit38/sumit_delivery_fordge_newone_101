@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireUser } from "@/lib/require-user";
 
 export async function POST(request: NextRequest) {
+  const auth = await requireUser(request);
+  if (auth.error) return auth.error;
+
   try {
     const { url } = await request.json();
 
@@ -8,11 +12,14 @@ export async function POST(request: NextRequest) {
       throw new Error("URL is required");
     }
 
-    // Validate URL format
+    let parsed: URL;
     try {
-      new URL(url);
+      parsed = new URL(url);
     } catch {
       throw new Error("Invalid URL format");
+    }
+    if (!isPublicHttpUrl(parsed)) {
+      throw new Error("Only public http(s) URLs can be fetched");
     }
 
     // Fetch the website content
@@ -38,6 +45,22 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
+}
+
+function isPublicHttpUrl(url: URL): boolean {
+  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+  const host = url.hostname.toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost") || host === "0.0.0.0") return false;
+  if (host.startsWith("[") || host.includes(":")) return false;
+  const ipv4 = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (ipv4) {
+    const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
+    if (a === 10 || a === 127 || a === 0) return false;
+    if (a === 169 && b === 254) return false;
+    if (a === 172 && b >= 16 && b <= 31) return false;
+    if (a === 192 && b === 168) return false;
+  }
+  return true;
 }
 
 async function extractWebsiteText(urlStr: string): Promise<string> {

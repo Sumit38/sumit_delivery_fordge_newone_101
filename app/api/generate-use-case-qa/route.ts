@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireUser } from "@/lib/require-user";
+import { checkRateLimit } from "@/lib/rate-limit";
 import { Anthropic } from "@anthropic-ai/sdk";
 
 export async function POST(request: NextRequest) {
+  const auth = await requireUser(request);
+  if (auth.error) return auth.error;
+  const limited = checkRateLimit(auth.userId);
+  if (limited) return limited;
+
   try {
     const { requirementText, requirementTitle } = await request.json();
 
@@ -107,7 +114,7 @@ Rules:
           useCaseData = JSON.parse(jsonMatch[0]);
         } catch (secondError) {
           // Try repairing common JSON issues
-          let repaired = jsonMatch[0]
+          const repaired = jsonMatch[0]
             .replace(/,\s*}/g, "}") // Remove trailing commas before }
             .replace(/,\s*]/g, "]") // Remove trailing commas before ]
             .replace(/\n/g, "\\n"); // Escape newlines in strings

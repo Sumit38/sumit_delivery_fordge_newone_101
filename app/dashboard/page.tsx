@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { authFetch } from "@/lib/auth-fetch";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { signOut } from "@/lib/auth";
@@ -70,7 +71,7 @@ export default function DashboardPage() {
 
       // Fetch user preferences
       try {
-        const response = await fetch("/api/user-preferences", {
+        const response = await authFetch("/api/user-preferences", {
           headers: {
             "Authorization": `Bearer ${session.access_token}`,
           },
@@ -129,7 +130,7 @@ export default function DashboardPage() {
         return;
       }
 
-      const response = await fetch("/api/analyze", {
+      const response = await authFetch("/api/analyze", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -182,7 +183,7 @@ export default function DashboardPage() {
       if (!session) return;
 
       const newValue = !timelineEnabled;
-      const response = await fetch("/api/user-preferences", {
+      const response = await authFetch("/api/user-preferences", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -314,7 +315,7 @@ export default function DashboardPage() {
                           return;
                         }
 
-                        const response = await fetch("/api/user-preferences", {
+                        const response = await authFetch("/api/user-preferences", {
                           method: "POST",
                           headers: {
                             "Content-Type": "application/json",
@@ -539,7 +540,7 @@ export default function DashboardPage() {
                   const { data: { session } } = await supabase.auth.getSession();
                   if (!session) return;
 
-                  const response = await fetch("/api/analyses", {
+                  const response = await authFetch("/api/analyses", {
                     headers: {
                       "Authorization": `Bearer ${session.access_token}`,
                     },

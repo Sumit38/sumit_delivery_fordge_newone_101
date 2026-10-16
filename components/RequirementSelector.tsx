@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { authFetch } from "@/lib/auth-fetch";
 import { supabase } from "@/lib/supabase";
 
 interface Analysis {
@@ -33,7 +34,7 @@ export default function RequirementSelector({
           return;
         }
 
-        const response = await fetch("/api/analyses", {
+        const response = await authFetch("/api/analyses", {
           headers: {
             "Authorization": `Bearer ${session.access_token}`,
           },

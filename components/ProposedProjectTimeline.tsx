@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { authFetch } from "@/lib/auth-fetch";
 import { supabase } from "@/lib/supabase";
 
 interface TimelineProps {
@@ -148,7 +149,7 @@ export default function ProposedProjectTimeline({
         throw new Error("User session not found");
       }
 
-      const response = await fetch("/api/save-project-timeline", {
+      const response = await authFetch("/api/save-project-timeline", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

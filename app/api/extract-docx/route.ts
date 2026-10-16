@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireUser } from "@/lib/require-user";
 
 export async function POST(request: NextRequest) {
+  const auth = await requireUser(request);
+  if (auth.error) return auth.error;
+
   // DOCX support requires proper ZIP + XML parsing libraries
   // For now, direct users to convert or paste instead
   return NextResponse.json(

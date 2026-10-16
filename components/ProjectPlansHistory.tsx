@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { authFetch } from "@/lib/auth-fetch";
 import { supabase } from "@/lib/supabase";
 
 interface UserStory {
@@ -61,8 +62,8 @@ export default function ProjectPlansHistory() {
       };
 
       const [storiesRes, timelinesRes] = await Promise.all([
-        fetch("/api/get-user-stories", { headers }),
-        fetch("/api/get-project-timelines", { headers }),
+        authFetch("/api/get-user-stories", { headers }),
+        authFetch("/api/get-project-timelines", { headers }),
       ]);
 
       if (!storiesRes.ok || !timelinesRes.ok) {

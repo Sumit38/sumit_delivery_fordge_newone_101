@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { authFetch } from "@/lib/auth-fetch";
 import { supabase } from "@/lib/supabase";
 
 interface RefinedQuestion {
@@ -64,7 +65,7 @@ export default function AnalysisForm({ onComplete, onRefineRequired }: AnalysisF
     if (fileType === "application/pdf" || fileName.endsWith(".pdf")) {
       try {
         const arrayBuffer = await file.arrayBuffer();
-        const response = await fetch("/api/extract-pdf", {
+        const response = await authFetch("/api/extract-pdf", {
           method: "POST",
           headers: { "Content-Type": "application/octet-stream" },
           body: arrayBuffer,
@@ -87,7 +88,7 @@ export default function AnalysisForm({ onComplete, onRefineRequired }: AnalysisF
     ) {
       try {
         const arrayBuffer = await file.arrayBuffer();
-        const response = await fetch("/api/extract-docx", {
+        const response = await authFetch("/api/extract-docx", {
           method: "POST",
           headers: { "Content-Type": "application/octet-stream" },
           body: arrayBuffer,
@@ -121,7 +122,7 @@ export default function AnalysisForm({ onComplete, onRefineRequired }: AnalysisF
 
   const extractTextFromWebsite = async (url: string): Promise<string> => {
     try {
-      const response = await fetch("/api/extract-website", {
+      const response = await authFetch("/api/extract-website", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
@@ -220,7 +221,7 @@ export default function AnalysisForm({ onComplete, onRefineRequired }: AnalysisF
       const refinedFromSession = typeof window !== "undefined" ? sessionStorage.getItem("refinedRequirementText") : null;
       const textToAnalyze = refinedFromSession || requirementText;
 
-      const response = await fetch("/api/analyze", {
+      const response = await authFetch("/api/analyze", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

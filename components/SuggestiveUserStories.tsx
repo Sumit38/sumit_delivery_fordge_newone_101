@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { authFetch } from "@/lib/auth-fetch";
 import { supabase } from "@/lib/supabase";
 
 interface AcceptanceCriteria {
@@ -62,7 +63,7 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
     setError("");
 
     try {
-      const response = await fetch("/api/generate-user-stories", {
+      const response = await authFetch("/api/generate-user-stories", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -105,7 +106,7 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
         throw new Error("User session not found");
       }
 
-      const response = await fetch("/api/save-user-stories", {
+      const response = await authFetch("/api/save-user-stories", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

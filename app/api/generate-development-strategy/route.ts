@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireUser } from "@/lib/require-user";
+import { checkRateLimit } from "@/lib/rate-limit";
 import Anthropic from "@anthropic-ai/sdk";
 
 const anthropic = new Anthropic({
@@ -6,6 +8,11 @@ const anthropic = new Anthropic({
 });
 
 export async function POST(request: NextRequest) {
+  const auth = await requireUser(request);
+  if (auth.error) return auth.error;
+  const limited = checkRateLimit(auth.userId);
+  if (limited) return limited;
+
   try {
     const { requirementText, devComplexity } = await request.json();
 

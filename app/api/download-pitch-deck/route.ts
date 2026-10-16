@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireUser } from "@/lib/require-user";
 import PptxGenJS from "pptxgenjs";
 
 // Executive Theme Colors
@@ -593,6 +594,9 @@ function addCTASlide(prs: any, slide: any, totalSlides: number) {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = await requireUser(request);
+  if (auth.error) return auth.error;
+
   try {
     console.log("🔍 [1/2] Generating Professional Executive Pitch Deck...");
 

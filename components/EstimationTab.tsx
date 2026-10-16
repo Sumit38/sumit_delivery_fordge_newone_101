@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { authFetch } from "@/lib/auth-fetch";
 import { supabase } from "@/lib/supabase";
 import { EstimationQuestionsForm } from "./EstimationQuestionsForm";
 import { EstimationReport } from "./EstimationReport";
@@ -33,7 +34,7 @@ export function EstimationTab({
         throw new Error("Please sign in to generate estimation");
       }
 
-      const response = await fetch("/api/generate-estimation", {
+      const response = await authFetch("/api/generate-estimation", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

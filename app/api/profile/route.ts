@@ -1,48 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
+import { requireUser } from "@/lib/require-user";
 
 export async function GET(request: NextRequest) {
   try {
-    // Get auth from request
-    const authHeader = request.headers.get('authorization');
-    let userId: string | null = null;
-
-    try {
-      const token = authHeader?.replace('Bearer ', '');
-
-      if (!token) {
-        return NextResponse.json(
-          { error: "Unauthorized" },
-          { status: 401 }
-        );
-      }
-
-      // Decode JWT to extract user ID
-      const parts = token.split('.');
-      if (parts.length !== 3) {
-        return NextResponse.json(
-          { error: "Unauthorized" },
-          { status: 401 }
-        );
-      }
-
-      const decoded = JSON.parse(
-        Buffer.from(parts[1], 'base64').toString('utf-8')
-      );
-      userId = decoded.sub || null;
-
-      if (!userId) {
-        return NextResponse.json(
-          { error: "Unauthorized" },
-          { status: 401 }
-        );
-      }
-    } catch (authError) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
+    const auth = await requireUser(request);
+    if (auth.error) return auth.error;
+    const userId = auth.userId;
 
     const { data: user, error } = await supabaseServer
       .from("users")
@@ -69,46 +33,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // Get auth from request
-    const authHeader = request.headers.get('authorization');
-    let userId: string | null = null;
-
-    try {
-      const token = authHeader?.replace('Bearer ', '');
-
-      if (!token) {
-        return NextResponse.json(
-          { error: "Unauthorized" },
-          { status: 401 }
-        );
-      }
-
-      // Decode JWT to extract user ID
-      const parts = token.split('.');
-      if (parts.length !== 3) {
-        return NextResponse.json(
-          { error: "Unauthorized" },
-          { status: 401 }
-        );
-      }
-
-      const decoded = JSON.parse(
-        Buffer.from(parts[1], 'base64').toString('utf-8')
-      );
-      userId = decoded.sub || null;
-
-      if (!userId) {
-        return NextResponse.json(
-          { error: "Unauthorized" },
-          { status: 401 }
-        );
-      }
-    } catch (authError) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
+    const auth = await requireUser(request);
+    if (auth.error) return auth.error;
+    const userId = auth.userId;
 
     const body = await request.json();
     const { mobile, organization, role, email } = body;
@@ -120,7 +47,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if user already exists
     const { data: existingUser } = await supabaseServer
       .from("users")
       .select("id")
@@ -128,7 +54,6 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (existingUser) {
-      // Update existing user
       const { data, error } = await supabaseServer
         .from("users")
         .update({
@@ -153,7 +78,6 @@ export async function POST(request: NextRequest) {
         user: data,
       });
     } else {
-      // Create new user
       const { data, error } = await supabaseServer
         .from("users")
         .insert({

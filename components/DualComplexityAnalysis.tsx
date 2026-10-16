@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { authFetch } from "@/lib/auth-fetch";
 
 interface ComplexityData {
   nodesCount: number;
@@ -52,7 +53,7 @@ export default function DualComplexityAnalysis({ requirementText, requirementTyp
     setError("");
 
     try {
-      const response = await fetch("/api/dual-complexity-analysis", {
+      const response = await authFetch("/api/dual-complexity-analysis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requirementText, requirementType }),

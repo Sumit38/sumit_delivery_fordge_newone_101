@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { authFetch } from "@/lib/auth-fetch";
 
 interface Classification {
   type: string;
@@ -36,7 +37,7 @@ export default function RequirementClassification({ requirementText, onClassific
     setError("");
 
     try {
-      const response = await fetch("/api/classify-requirement", {
+      const response = await authFetch("/api/classify-requirement", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requirementText }),

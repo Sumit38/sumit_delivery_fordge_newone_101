@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { authFetch } from "@/lib/auth-fetch";
 import { supabase } from "@/lib/supabase";
 
 interface Scenario {
@@ -52,7 +53,7 @@ export default function ScenariosExtraction({
     setError("");
 
     try {
-      const response = await fetch("/api/extract-scenarios", {
+      const response = await authFetch("/api/extract-scenarios", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

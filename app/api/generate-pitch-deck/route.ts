@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireUser } from "@/lib/require-user";
+import { checkRateLimit } from "@/lib/rate-limit";
 import Anthropic from "@anthropic-ai/sdk";
 
 const anthropic = new Anthropic({
@@ -9,31 +11,10 @@ export async function POST(request: NextRequest) {
   try {
     console.log("🔍 [1/3] Validating pitch deck request...");
 
-    // Get auth header
-    const authHeader = request.headers.get("authorization");
-    let userId: string | null = null;
-
-    try {
-      const token = authHeader?.replace("Bearer ", "");
-      if (!token) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      }
-
-      const parts = token.split(".");
-      if (parts.length !== 3) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      }
-
-      const decoded = JSON.parse(
-        Buffer.from(parts[1], "base64").toString("utf-8")
-      );
-      userId = decoded.sub || null;
-
-      console.log("✅ [1/3] Auth success. UserId:", userId);
-    } catch (authError) {
-      console.error("⚠️ [1/3] Auth error:", authError);
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const auth = await requireUser(request);
+    if (auth.error) return auth.error;
+    const limited = checkRateLimit(auth.userId);
+    if (limited) return limited;
 
     // Parse request body
     console.log("🔍 [2/3] Parsing request body...");

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { authFetch } from "@/lib/auth-fetch";
 import { supabase } from "@/lib/supabase";
 
 interface EstimationData {
@@ -34,7 +35,7 @@ export default function EstimationHistory() {
           return;
         }
 
-        const response = await fetch("/api/analyses", {
+        const response = await authFetch("/api/analyses", {
           headers: {
             "Authorization": `Bearer ${session.access_token}`,
           },
@@ -111,7 +112,7 @@ export default function EstimationHistory() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      const response = await fetch(`/api/analyses/${id}`, {
+      const response = await authFetch(`/api/analyses/${id}`, {
         method: "DELETE",
         headers: {
           "Authorization": `Bearer ${session.access_token}`,

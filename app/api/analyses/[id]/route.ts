@@ -1,33 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
+import { requireUser } from "@/lib/require-user";
 
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const parts = token.split(".");
-    if (parts.length !== 3) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const decoded = JSON.parse(Buffer.from(parts[1], "base64").toString("utf-8"));
-    const userId = decoded.sub;
-
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const auth = await requireUser(request);
+    if (auth.error) return auth.error;
+    const userId = auth.userId;
 
     const { id } = await params;
 
-    // Verify the requirement belongs to the user before deleting
     const { data: requirement, error: reqError } = await supabaseServer
       .from("requirements")
       .select("id")
@@ -42,26 +27,21 @@ export async function DELETE(
       );
     }
 
-    // Delete in correct order (children first, then parent)
-    // 1. Delete user stories linked to this analysis
     await supabaseServer
       .from("user_stories")
       .delete()
       .eq("requirement_id", id);
 
-    // 2. Delete project timelines linked to this analysis
     await supabaseServer
       .from("project_timelines")
       .delete()
       .eq("requirement_id", id);
 
-    // 3. Delete complexity results
     await supabaseServer
       .from("complexity_results")
       .delete()
       .eq("requirement_id", id);
 
-    // 4. Finally delete the requirement itself
     const { error } = await supabaseServer
       .from("requirements")
       .delete()

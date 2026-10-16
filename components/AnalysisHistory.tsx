@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { authFetch } from "@/lib/auth-fetch";
 import { supabase } from "@/lib/supabase";
 import ScenariosExtraction from "./ScenariosExtraction";
 import { exportUserStoriesToExcel } from "@/lib/export-user-stories";
@@ -86,7 +87,7 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
           return;
         }
 
-        const response = await fetch("/api/analyses", {
+        const response = await authFetch("/api/analyses", {
           headers: {
             "Authorization": `Bearer ${session.access_token}`,
           },
@@ -180,7 +181,7 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
     }
 
     try {
-      const response = await fetch("/api/export-excel", {
+      const response = await authFetch("/api/export-excel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -234,7 +235,7 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      const response = await fetch(`/api/analyses/${id}`, {
+      const response = await authFetch(`/api/analyses/${id}`, {
         method: "DELETE",
         headers: {
           "Authorization": `Bearer ${session.access_token}`,
@@ -363,7 +364,7 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
                         return;
                       }
 
-                      const response = await fetch(`/api/get-analysis-details?requirementId=${analysis.id}`, {
+                      const response = await authFetch(`/api/get-analysis-details?requirementId=${analysis.id}`, {
                         headers: {
                           "Authorization": `Bearer ${session.access_token}`,
                         },

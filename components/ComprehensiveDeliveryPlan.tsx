@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { authFetch } from "@/lib/auth-fetch";
 
 interface DeliveryPlan {
   executiveSummary: { whatIsBeingDelivered: string; whyItMatters: string; successDefinition: string; timelineWeeks: number; budgetEstimate: number };
@@ -29,7 +30,7 @@ export default function ComprehensiveDeliveryPlan({ requirementText, classificat
   const generate = async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/generate-delivery-plan", {
+      const response = await authFetch("/api/generate-delivery-plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requirementText, classification, devComplexity, testComplexity }),

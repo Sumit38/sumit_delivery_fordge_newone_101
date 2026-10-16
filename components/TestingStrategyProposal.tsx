@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { authFetch } from "@/lib/auth-fetch";
 
 interface TestingStrategy {
   testPyramid: { unit: number; integration: number; e2e: number; description: string };
@@ -30,7 +31,7 @@ export default function TestingStrategyProposal({ requirementText, testingComple
     setError("");
 
     try {
-      const response = await fetch("/api/generate-testing-strategy", {
+      const response = await authFetch("/api/generate-testing-strategy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requirementText, testingComplexity }),

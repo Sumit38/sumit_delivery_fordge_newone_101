@@ -1,50 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
+import { requireUser } from "@/lib/require-user";
 
 export async function GET(request: NextRequest) {
   try {
-    // Get auth from request
-    const authHeader = request.headers.get('authorization');
-    let userId: string | null = null;
+    const auth = await requireUser(request);
+    if (auth.error) return auth.error;
+    const userId = auth.userId;
 
-    try {
-      const token = authHeader?.replace('Bearer ', '');
-
-      if (!token) {
-        return NextResponse.json(
-          { error: "Unauthorized" },
-          { status: 401 }
-        );
-      }
-
-      // Decode JWT to extract user ID
-      const parts = token.split('.');
-      if (parts.length !== 3) {
-        return NextResponse.json(
-          { error: "Unauthorized" },
-          { status: 401 }
-        );
-      }
-
-      const decoded = JSON.parse(
-        Buffer.from(parts[1], 'base64').toString('utf-8')
-      );
-      userId = decoded.sub || null;
-
-      if (!userId) {
-        return NextResponse.json(
-          { error: "Unauthorized" },
-          { status: 401 }
-        );
-      }
-    } catch (authError) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
-    // Get all requirements and their analysis results
     const { data: requirements, error: reqError } = await supabaseServer
       .from("requirements")
       .select(
@@ -73,7 +36,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get estimations for all requirements
     const { data: estimations, error: estError } = await supabaseServer
       .from("estimations")
       .select("*")
@@ -81,10 +43,8 @@ export async function GET(request: NextRequest) {
 
     if (estError) {
       console.error("Error fetching estimations:", estError);
-      // Continue without estimations data
     }
 
-    // Create a map of requirement_id -> latest estimation
     const estimationMap = new Map();
     if (estimations) {
       estimations.forEach((est: any) => {
@@ -95,7 +55,6 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Transform data for frontend
     const analyses = requirements
       .filter((req: any) => req.complexity_results.length > 0)
       .map((req: any) => {

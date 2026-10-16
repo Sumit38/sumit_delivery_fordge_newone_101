@@ -1,37 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
+import { requireUser } from "@/lib/require-user";
 
 export async function POST(request: NextRequest) {
   try {
-    // Extract user ID from Authorization header
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-
-    if (!token) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
-    // Decode JWT to get user ID
-    const parts = token.split(".");
-    if (parts.length !== 3) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
-    const decoded = JSON.parse(Buffer.from(parts[1], "base64").toString("utf-8"));
-    const userId = decoded.sub;
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
+    const auth = await requireUser(request);
+    if (auth.error) return auth.error;
+    const userId = auth.userId;
 
     const { analysisId, stories, summary } = await request.json();
 
@@ -42,7 +17,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // analysisId is the requirement ID - fetch the analysis_result to get the actual complexity_results ID
+    const { data: owned } = await supabaseServer
+      .from("requirements")
+      .select("id")
+      .eq("id", analysisId)
+      .eq("user_id", userId)
+      .single();
+
+    if (!owned) {
+      return NextResponse.json({ error: "Analysis not found" }, { status: 404 });
+    }
+
     const { data: analysisData, error: analysisError } = await supabaseServer
       .from("complexity_results")
       .select("id")
@@ -58,7 +43,6 @@ export async function POST(request: NextRequest) {
 
     const complexityResultsId = analysisData.id;
 
-    // Insert into user_stories table
     const { data, error } = await supabaseServer
       .from("user_stories")
       .insert({
@@ -74,7 +58,6 @@ export async function POST(request: NextRequest) {
     if (error) {
       console.error("Database error:", error);
 
-      // Handle missing table gracefully (first time users)
       if (error.code === "PGRST205") {
         return NextResponse.json(
           { error: "Database table not initialized. Please contact support to set up your workspace." },

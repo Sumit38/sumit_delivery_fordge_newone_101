@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireUser } from "@/lib/require-user";
+import { checkRateLimit } from "@/lib/rate-limit";
 import Anthropic from "@anthropic-ai/sdk";
 
 const anthropic = new Anthropic({
@@ -26,6 +28,11 @@ interface TestCase {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = await requireUser(request);
+  if (auth.error) return auth.error;
+  const limited = checkRateLimit(auth.userId);
+  if (limited) return limited;
+
   try {
     console.log("🔍 [1/3] Extracting scenarios from requirement...");
 
@@ -150,7 +157,7 @@ NO skipping, NO vague scenarios, NO placeholders.`,
 
     // Parse scenarios from Claude's response
     // Claude independently identifies meaningful scenarios from requirement
-    let detailedScenarios = parseScenarios(fullText, p, complexityScore);
+    const detailedScenarios = parseScenarios(fullText, p, complexityScore);
 
     // Calculate total scenarios needed (2P = 2 * distinct paths)
     const totalScenariosNeeded = 2 * p;

@@ -1,57 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { analyzeRequirementComplexity } from "@/lib/complexity-analyzer";
+import { requireUser } from "@/lib/require-user";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 export async function POST(request: NextRequest) {
   try {
     console.log("🔍 [1/5] Checking Supabase authentication...");
 
-    // ✅ STEP 1: Get auth from request
-    const authHeader = request.headers.get('authorization');
-    let userId: string | null = null;
+    const auth = await requireUser(request);
+    if (auth.error) return auth.error;
+    const userId = auth.userId;
 
-    try {
-      const token = authHeader?.replace('Bearer ', '');
-
-      if (!token) {
-        console.error("❌ [1/5] No token");
-        return NextResponse.json(
-          { error: "Unauthorized" },
-          { status: 401 }
-        );
-      }
-
-      // Decode JWT to extract user ID
-      const parts = token.split('.');
-      if (parts.length !== 3) {
-        console.error("❌ [1/5] Invalid token");
-        return NextResponse.json(
-          { error: "Unauthorized" },
-          { status: 401 }
-        );
-      }
-
-      const decoded = JSON.parse(
-        Buffer.from(parts[1], 'base64').toString('utf-8')
-      );
-      userId = decoded.sub || null;
-
-      console.log("✅ [1/5] Auth success. UserId:", userId);
-    } catch (authError) {
-      console.error("⚠️ [1/5] Auth error:", authError);
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
-    if (!userId) {
-      console.error("❌ [1/5] No userId found");
-      return NextResponse.json(
-        { error: "Unauthorized - please sign in" },
-        { status: 401 }
-      );
-    }
+    const limited = checkRateLimit(userId);
+    if (limited) return limited;
 
     console.log("🔍 [2/5] Validating request body...");
 

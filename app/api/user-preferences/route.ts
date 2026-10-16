@@ -1,30 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
+import { requireUser } from "@/lib/require-user";
 
 export async function GET(request: NextRequest) {
   try {
-    const authHeader = request.headers.get('authorization');
-    const token = authHeader?.replace('Bearer ', '');
+    const auth = await requireUser(request);
+    if (auth.error) return auth.error;
+    const userId = auth.userId;
 
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const decoded = JSON.parse(
-      Buffer.from(parts[1], 'base64').toString('utf-8')
-    );
-    const userId = decoded.sub;
-
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // Get user preferences
     const { data, error } = await supabaseServer
       .from("users")
       .select("preferences")
@@ -55,30 +38,12 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const authHeader = request.headers.get('authorization');
-    const token = authHeader?.replace('Bearer ', '');
-
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const decoded = JSON.parse(
-      Buffer.from(parts[1], 'base64').toString('utf-8')
-    );
-    const userId = decoded.sub;
-
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const auth = await requireUser(request);
+    if (auth.error) return auth.error;
+    const userId = auth.userId;
 
     const body = await request.json();
 
-    // Get existing preferences first
     const { data: existingData } = await supabaseServer
       .from("users")
       .select("preferences")
@@ -90,20 +55,14 @@ export async function POST(request: NextRequest) {
       pitch_deck_enabled: false,
     };
 
-    // Check if body has 'preferences' object or individual fields
     let updatedPreferences: any;
 
     if (body.preferences) {
-      // If preferences object is provided, use it
       updatedPreferences = { ...existingPreferences, ...body.preferences };
     } else {
-      // Otherwise, merge individual fields
       updatedPreferences = { ...existingPreferences, ...body };
     }
 
-    console.log("Updating preferences:", updatedPreferences);
-
-    // Update user preferences
     const { data, error } = await supabaseServer
       .from("users")
       .update({ preferences: updatedPreferences })

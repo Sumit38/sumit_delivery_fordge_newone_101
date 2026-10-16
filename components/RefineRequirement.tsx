@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { authFetch } from "@/lib/auth-fetch";
 
 interface Question {
   id: string;
@@ -72,7 +73,7 @@ export default function RefineRequirement({ onRefinementComplete, onAnalyzeRequi
 
   const extractTextFromWebsite = async (url: string): Promise<string> => {
     try {
-      const response = await fetch("/api/extract-website", {
+      const response = await authFetch("/api/extract-website", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
@@ -151,7 +152,7 @@ export default function RefineRequirement({ onRefinementComplete, onAnalyzeRequi
     setError("");
 
     try {
-      const response = await fetch("/api/refine-requirement", {
+      const response = await authFetch("/api/refine-requirement", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rawRequirement: req }),
