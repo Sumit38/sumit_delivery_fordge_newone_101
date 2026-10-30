@@ -193,7 +193,7 @@ export async function analyzeRequirementComplexity(
       messages: [
         {
           role: "user",
-          content: `Use McCabe's formula M = E - N + 2P to analyze this requirement. Be thorough and explicit.
+          content: `Use McCabe's formula M = E - N + 2P to analyze this requirement. Be thorough in the analysis, but write the answer in the compact format below.
 
 REQUIREMENT:
 ${requirementText}
@@ -240,30 +240,37 @@ STEP-BY-STEP INSTRUCTIONS:
    - Are there parallel flows or conditional branches?
    - Did you consider error handling and edge cases?
 
-Output in this format:
+COVERAGE: "Compact" applies to the wording only, never to coverage. Model every decision the requirement and the answers describe: each validation rule that can fail, each configurable option or mode, approval and rejection, duplicates, retries and retry exhaustion, notifications and other failure handling.
+
+OUTPUT FORMAT (strict, compact):
+- Plain text only: no markdown, no bold, no "#" headings, no tables, no extra commentary.
+- Give every node a short ID: START, N1, N2, N3 ... and END. Use the IDs (not the labels) in EDGES and PATHS.
+- Node labels: at most 6 words. Edge conditions: at most 4 words.
+- A path is a distinct route from START to END. A path never visits the same node twice; show a loop (such as a retry) as an edge back, and the retry branch as its own path.
+- In CALCULATION, N, E and P must equal the number of lines you listed under NODES, EDGES and PATHS. Do not show working.
 
 REASONING:
-[One short paragraph, at most 3 sentences.]
+One short paragraph, at most 3 sentences.
 
 NODES:
-- Start
-- [list each node with brief description]
-- End
+START | Start
+N1 | short label
+N2 | short label
+END | End
 
 EDGES:
-- Start -> [node] (condition/trigger)
-- [list all edges with conditions]
+START > N1 | condition
+N1 > N2 | condition
 
 PATHS:
-- Path 1: [Start -> ... -> End]
-- Path 2: [Start -> ... -> End]
-- [list all distinct paths]
+P1: START, N1, N2, END
+P2: START, N1, END
 
 CALCULATION:
-N = [number] (nodes count including Start and End)
-E = [number] (edges count)
-P = [number] (distinct paths count)
-M = E - N + 2P = [number]`,
+N = number
+E = number
+P = number
+M = E - N + 2P = number`,
         },
       ],
     });
@@ -280,9 +287,16 @@ M = E - N + 2P = [number]`,
 
     console.log("\n📝 Claude Analysis:\n", fullText);
 
+    // Compact ID format (START/N1/.../END) is the primary format; the older
+    // free-text parser below only runs if Claude did not follow it.
+    const compact = parseCompactGraph(fullText);
+    if (compact) {
+      console.log(`✅ Compact graph parsed: ${compact.nodes.length} nodes, ${compact.edges.length} edges, ${compact.paths.length} paths`);
+    }
+
     // Parse nodes - try structured format first, then fallback to scanning for node-like content
-    let nodesList: string[] = [];
-    const nodesMatch = fullText.match(/NODES:\s*([\s\S]*?)(?=EDGES:|$)/i);
+    let nodesList: string[] = compact ? compact.nodes : [];
+    const nodesMatch = compact ? null : fullText.match(/NODES:\s*([\s\S]*?)(?=EDGES:|$)/i);
     if (nodesMatch) {
       nodesList = nodesMatch[1]
         .split("\n")
@@ -292,8 +306,8 @@ M = E - N + 2P = [number]`,
     }
 
     // Parse edges - try structured format first
-    let edgesList: Array<{ from: string; to: string; condition?: string }> = [];
-    const edgesMatch = fullText.match(/EDGES:\s*([\s\S]*?)(?=PATHS:|$)/i);
+    let edgesList: Array<{ from: string; to: string; condition?: string }> = compact ? compact.edges : [];
+    const edgesMatch = compact ? null : fullText.match(/EDGES:\s*([\s\S]*?)(?=PATHS:|$)/i);
     if (edgesMatch) {
       const edgeLines = edgesMatch[1].split("\n");
       edgeLines.forEach((line) => {
@@ -312,8 +326,8 @@ M = E - N + 2P = [number]`,
     }
 
     // Parse paths
-    const pathsList: string[][] = [];
-    const pathsMatch = fullText.match(/PATHS:\s*([\s\S]*?)(?=CALCULATION:|$)/i);
+    const pathsList: string[][] = compact ? compact.paths : [];
+    const pathsMatch = compact ? null : fullText.match(/PATHS:\s*([\s\S]*?)(?=CALCULATION:|$)/i);
     if (pathsMatch) {
       const pathLines = pathsMatch[1].split("\n");
       pathLines.forEach((line) => {
@@ -334,25 +348,39 @@ M = E - N + 2P = [number]`,
       return match ? parseInt(match[1]) : null;
     };
 
-    // Extract N - try multiple formats
-    let n = extractNumber(/^N\s*[:=]\s*(\d+)/im);
-    if (n === null) n = extractNumber(/N\s*[:=]\s*(\d+)/);
-    if (n === null) n = nodesList.length || extractNumber(/Nodes?.*?(\d+)/i);
+    let n: number | null, e: number | null, p: number | null, m: number | null;
+    if (compact) {
+      // Count from the graph Claude listed (the same graph that is stored and drawn).
+      // Claude's own arithmetic is often off by a few (e.g. leaving out Start/End).
+      n = compact.nodes.length;
+      e = compact.edges.length;
+      p = compact.paths.length;
+      m = e - n + 2 * p;
+      const { stated } = compact;
+      if (stated.n !== n || stated.e !== e || stated.p !== p) {
+        console.log(`ℹ️ Claude stated N=${stated.n}, E=${stated.e}, P=${stated.p}; counted from listed graph: N=${n}, E=${e}, P=${p}`);
+      }
+    } else {
+      // Extract N - try multiple formats
+      n = extractNumber(/^N\s*[:=]\s*(\d+)/im);
+      if (n === null) n = extractNumber(/N\s*[:=]\s*(\d+)/);
+      if (n === null) n = nodesList.length || extractNumber(/Nodes?.*?(\d+)/i);
 
-    // Extract E - try multiple formats
-    let e = extractNumber(/^E\s*[:=]\s*(\d+)/im);
-    if (e === null) e = extractNumber(/E\s*[:=]\s*(\d+)/);
-    if (e === null) e = edgesList.length || extractNumber(/Edges?.*?(\d+)/i);
+      // Extract E - try multiple formats
+      e = extractNumber(/^E\s*[:=]\s*(\d+)/im);
+      if (e === null) e = extractNumber(/E\s*[:=]\s*(\d+)/);
+      if (e === null) e = edgesList.length || extractNumber(/Edges?.*?(\d+)/i);
 
-    // Extract P - try multiple formats
-    let p = extractNumber(/^P\s*[:=]\s*(\d+)/im);
-    if (p === null) p = extractNumber(/P\s*[:=]\s*(\d+)/);
-    if (p === null) p = pathsList.length || extractNumber(/Paths?.*?(\d+)/i);
+      // Extract P - try multiple formats
+      p = extractNumber(/^P\s*[:=]\s*(\d+)/im);
+      if (p === null) p = extractNumber(/P\s*[:=]\s*(\d+)/);
+      if (p === null) p = pathsList.length || extractNumber(/Paths?.*?(\d+)/i);
 
-    // Extract M - try multiple formats
-    let m = extractNumber(/^M\s*[:=]\s*(\d+)/im);
-    if (m === null) m = extractNumber(/M\s*[:=]\s*(\d+)/);
-    if (m === null) m = extractNumber(/Complexity.*?(\d+)/i);
+      // Extract M - try multiple formats
+      m = extractNumber(/^M\s*[:=]\s*(\d+)/im);
+      if (m === null) m = extractNumber(/M\s*[:=]\s*(\d+)/);
+      if (m === null) m = extractNumber(/Complexity.*?(\d+)/i);
+    }
 
     // Validate extraction - be strict about this
     console.log("📊 Extraction Results:");
@@ -1352,6 +1380,123 @@ function enumerateForwardPaths(
 
   walk(start, [start]);
   return paths.length > 0 ? paths : [[start, end]];
+}
+
+interface CompactGraph {
+  nodes: string[];
+  edges: Array<{ from: string; to: string; condition?: string }>;
+  paths: string[][];
+  stated: { n: number | null; e: number | null; p: number | null; m: number | null };
+}
+
+// Reads the compact answer format (START | Start, N1 > N2 | cond, P1: START, N1, END)
+// and turns IDs back into labels, so stored nodes/edges/paths keep the same shape as before.
+// Returns null when the answer is not in this format.
+export function parseCompactGraph(text: string): CompactGraph | null {
+  const clean = (line: string) =>
+    line
+      .replace(/\*\*|`/g, "")
+      .replace(/^#+\s*/, "")
+      .replace(/^\s*[-•*]\s+/, "")
+      .trim();
+
+  const lines = text.split("\n").map(clean);
+  const sections: Record<string, string[]> = {};
+  let current = "";
+  for (const line of lines) {
+    const header = line.match(/^(REASONING|NODES|EDGES|PATHS|CALCULATION)\s*:?\s*$/i);
+    if (header) {
+      // Claude sometimes repeats a header (e.g. "NODES:" again before "N = 21"), so append
+      current = header[1].toUpperCase();
+      sections[current] = sections[current] || [];
+      continue;
+    }
+    if (current && line) sections[current].push(line);
+  }
+
+  const labelById = new Map<string, string>();
+  const usedLabels = new Set<string>();
+  for (const line of sections.NODES || []) {
+    const match = line.match(/^([A-Za-z][A-Za-z0-9_-]*)\s*\|\s*(.+)$/);
+    if (!match) continue;
+    const id = match[1].toUpperCase();
+    let label = id === "START" ? "Start" : id === "END" ? "End" : match[2].trim();
+    // Labels are what we store, so they must be unique
+    if (usedLabels.has(label)) label = `${label} (${id})`;
+    usedLabels.add(label);
+    labelById.set(id, label);
+  }
+  if (!labelById.has("START") || !labelById.has("END") || labelById.size < 2) return null;
+
+  const resolve = (id: string) => labelById.get(id.trim().toUpperCase());
+
+  const edges: CompactGraph["edges"] = [];
+  const edgeKeys = new Set<string>();
+  for (const line of sections.EDGES || []) {
+    const match = line.match(/^([A-Za-z][A-Za-z0-9_-]*)\s*(?:-->|->|→|>)\s*([A-Za-z][A-Za-z0-9_-]*)\s*(?:\|\s*(.*))?$/);
+    if (!match) continue;
+    const from = resolve(match[1]);
+    const to = resolve(match[2]);
+    if (!from || !to) continue;
+    const key = `${from}|${to}`;
+    if (edgeKeys.has(key)) continue;
+    edgeKeys.add(key);
+    edges.push({ from, to, condition: match[3]?.trim() || undefined });
+  }
+
+  const paths: string[][] = [];
+  const pathKeys = new Set<string>();
+  for (const line of sections.PATHS || []) {
+    const body = line.replace(/^P(?:ath)?\s*\d+\s*[:.)-]\s*/i, "");
+    const ids = body.split(/\s*(?:,|-->|->|→|>)\s*/).filter(Boolean);
+    const labels = ids.map(resolve);
+    if (labels.length < 2 || labels.some((l) => !l)) continue;
+    const route = labels as string[];
+    if (route[0] !== "Start" || route[route.length - 1] !== "End") continue;
+    const key = route.join("|");
+    if (pathKeys.has(key)) continue;
+    pathKeys.add(key);
+    paths.push(route);
+  }
+
+  if (edges.length === 0 || paths.length === 0) return null;
+
+  // Every step a path takes must exist as an edge, so the graph and the paths agree
+  for (const route of paths) {
+    for (let i = 0; i < route.length - 1; i++) {
+      const key = `${route[i]}|${route[i + 1]}`;
+      if (!edgeKeys.has(key)) {
+        edgeKeys.add(key);
+        edges.push({ from: route[i], to: route[i + 1], condition: "implied by path" });
+      }
+    }
+  }
+
+  const calc = lines.join("\n");
+  const stat = (letter: string) => {
+    const match = calc.match(new RegExp(`^${letter}\\s*[:=]\\s*(\\d+)\\s*$`, "im"));
+    return match ? parseInt(match[1], 10) : null;
+  };
+  const mMatch = calc.match(/^M\s*=.*?=\s*(-?\d+)\s*$/im) || calc.match(/^M\s*[:=]\s*(-?\d+)\s*$/im);
+
+  return {
+    nodes: [...labelById.values()],
+    edges,
+    paths,
+    stated: { n: stat("N"), e: stat("E"), p: stat("P"), m: mMatch ? parseInt(mMatch[1], 10) : null },
+  };
+}
+
+// Used by the API route when Claude does not answer in time: builds the
+// requirement-aware estimate instead of a generic placeholder graph.
+export function createTimeoutFallback(requirementText: string): ComplexityAnalysis {
+  const answered = Math.min((requirementText.match(/A:\s*Selected:/gm) || []).length, 15);
+  const path: "guided" | "hybrid" | "direct" = answered >= 8 ? "guided" : answered > 0 ? "hybrid" : "direct";
+  const fallback = createFallbackAnalysis(requirementText, path, answered, Math.round((answered / 15) * 100));
+  return {
+    ...fallback,
+    analysis: `${fallback.analysis} (The AI analysis did not finish in time.)`,
+  };
 }
 
 function createFallbackAnalysis(

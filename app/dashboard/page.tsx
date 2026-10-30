@@ -16,6 +16,10 @@ import DownloadUseCaseButton from "@/components/DownloadUseCaseButton";
 import RequirementSelector from "@/components/RequirementSelector";
 import { EstimationTab } from "@/components/EstimationTab";
 import { PitchDeckTab } from "@/components/PitchDeckTab";
+import { getProposedManDays } from "@/lib/estimation-calculator";
+import { calculationNotes } from "@/lib/calculation-notes";
+import InfoTip from "@/components/InfoTip";
+import type { ComprehensiveDetails } from "@/lib/estimation-team";
 
 interface LatestAnalysis {
   id?: string;
@@ -41,6 +45,7 @@ interface LatestAnalysis {
     techFamiliarity: string;
     testingLevel: string;
     confidence: number;
+    breakdown?: { details?: ComprehensiveDetails } | null;
   };
 }
 
@@ -216,6 +221,14 @@ export default function DashboardPage() {
     );
   }
 
+  // Dev / QA man-days: from the detailed estimation once one exists,
+  // otherwise the quick estimate from the complexity score
+  const proposed = latestAnalysis
+    ? getProposedManDays(latestAnalysis.complexityScore, latestAnalysis.estimationData)
+    : null;
+  const devManDays = proposed?.fromEstimation ? proposed.devManDays : latestAnalysis?.devManDays ?? 0;
+  const qaManDays = proposed?.fromEstimation ? proposed.qaManDays : latestAnalysis?.qaManDays ?? 0;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
       {/* Header */}
@@ -238,8 +251,8 @@ export default function DashboardPage() {
                 requirementText={latestAnalysis.requirementText}
                 complexityScore={latestAnalysis.complexityScore}
                 complexityLevel={latestAnalysis.complexityLevel}
-                devManDays={latestAnalysis.devManDays}
-                qaManDays={latestAnalysis.qaManDays}
+                devManDays={devManDays}
+                qaManDays={qaManDays}
                 testScenarios={latestAnalysis.testScenarios || latestAnalysis.complexityScore * 2}
                 nodesCount={latestAnalysis.nodesCount || 0}
                 edgesCount={latestAnalysis.edgesCount || 0}
@@ -685,6 +698,8 @@ export default function DashboardPage() {
               <EstimationTab
                 requirementId={latestAnalysis.id!}
                 complexityScore={latestAnalysis.complexityScore}
+                paths={latestAnalysis.paths}
+                testScenarios={latestAnalysis.testScenarios}
                 onEstimationComplete={(estimation) => {
                   setLatestAnalysis({
                     ...latestAnalysis,
@@ -692,6 +707,13 @@ export default function DashboardPage() {
                   });
                   // Trigger EstimationHistory refresh
                   setEstimationRefresh((prev) => !prev);
+                }}
+                onViewHistory={() => {
+                  setIsTransitioning(true);
+                  setTimeout(() => {
+                    setActiveTab("estimation");
+                    setIsTransitioning(false);
+                  }, 300);
                 }}
               />
             ) : (
@@ -727,21 +749,52 @@ export default function DashboardPage() {
                     <h3 className="text-lg font-semibold text-slate-800 mb-4">Basic Metrics</h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
-                        <p className="text-sm text-slate-600 mb-1">Complexity Score</p>
+                        <p className="text-sm text-slate-600 mb-1">
+                          Complexity Score
+                          <InfoTip
+                            note={calculationNotes.complexity(
+                              latestAnalysis.nodesCount,
+                              latestAnalysis.edgesCount,
+                              latestAnalysis.paths,
+                              latestAnalysis.complexityScore
+                            )}
+                          />
+                        </p>
                         <p className="text-3xl font-bold text-blue-600">{latestAnalysis.complexityScore}</p>
                         <p className="text-xs text-slate-600 mt-2">{latestAnalysis.complexityLevel} Complexity</p>
                       </div>
                       <div className="p-4 bg-green-50 rounded-lg border border-green-200">
-                        <p className="text-sm text-slate-600 mb-1">Basic Dev Estimation</p>
-                        <p className="text-3xl font-bold text-green-600">~{Math.round(latestAnalysis.devManDays)}</p>
-                        <p className="text-xs text-slate-600 mt-2">Man-days</p>
+                        <p className="text-sm text-slate-600 mb-1">
+                          {proposed?.fromEstimation ? "Dev Estimation" : "Basic Dev Estimation"}
+                          <InfoTip note={calculationNotes.dev(latestAnalysis.complexityScore, latestAnalysis.estimationData)} />
+                        </p>
+                        <p className="text-3xl font-bold text-green-600">~{Math.round(devManDays)}</p>
+                        <p className="text-xs text-slate-600 mt-2">
+                          {proposed?.fromEstimation
+                            ? `Man-days · ${latestAnalysis.estimationData?.breakdown?.details?.devHours ?? 0} h development + ${latestAnalysis.estimationData?.breakdown?.details?.defectFixHours ?? 0} h defect fixing`
+                            : "Man-days"}
+                        </p>
                       </div>
                       <div className="p-4 bg-purple-50 rounded-lg border border-purple-200">
-                        <p className="text-sm text-slate-600 mb-1">Basic QA Estimation</p>
-                        <p className="text-3xl font-bold text-purple-600">~{Math.round(latestAnalysis.qaManDays)}</p>
-                        <p className="text-xs text-slate-600 mt-2">Man-days</p>
+                        <p className="text-sm text-slate-600 mb-1">
+                          {proposed?.fromEstimation ? "QA Estimation" : "Basic QA Estimation"}
+                          <InfoTip align="right" note={calculationNotes.qa(latestAnalysis.complexityScore, latestAnalysis.estimationData)} />
+                        </p>
+                        <p className="text-3xl font-bold text-purple-600">~{Math.round(qaManDays)}</p>
+                        <p className="text-xs text-slate-600 mt-2">
+                          {proposed?.fromEstimation
+                            ? `Man-days · ${latestAnalysis.estimationData?.breakdown?.details?.testingHours ?? 0} h across ${latestAnalysis.estimationData?.breakdown?.details?.testActivities.length ?? 0} testing activities`
+                            : "Man-days"}
+                        </p>
                       </div>
                     </div>
+                    <p className="text-xs text-slate-500 mt-3">
+                      {proposed?.fromEstimation
+                        ? `Dev and QA come from your saved estimation (team, seniority and testing answers)${
+                            proposed.supportManDays > 0 ? `; support roles add ~${Math.round(proposed.supportManDays)} man-days` : ""
+                          }. The quick estimate from the complexity score was Dev ~${Math.round(latestAnalysis.complexityScore * 0.8)} and QA ~${Math.round(latestAnalysis.complexityScore * 0.5)} man-days.`
+                        : "Quick estimate from the complexity score: Dev = M × 0.8, QA = M × 0.5 man-days. Generate an estimation to replace it with one based on your team and testing plan."}
+                    </p>
                   </div>
 
                   {/* Calculated Estimation (if available) */}
@@ -750,18 +803,24 @@ export default function DashboardPage() {
                       <h3 className="text-lg font-semibold text-slate-800 mb-4">✅ Calculated Estimation</h3>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="p-4 bg-white rounded-lg border border-slate-200">
-                          <p className="text-sm text-slate-600 mb-1">Total Effort</p>
+                          <p className="text-sm text-slate-600 mb-1">
+                            Total Effort <InfoTip note={calculationNotes.totalEffort(latestAnalysis.estimationData)} />
+                          </p>
                           <p className="text-3xl font-bold text-blue-600">{latestAnalysis.estimationData.totalEffort}</p>
                           <p className="text-xs text-slate-600 mt-2">hours</p>
                         </div>
                         <div className="p-4 bg-white rounded-lg border border-slate-200">
-                          <p className="text-sm text-slate-600 mb-1">Estimated Timeline</p>
+                          <p className="text-sm text-slate-600 mb-1">
+                            Estimated Timeline <InfoTip note={calculationNotes.timeline(latestAnalysis.estimationData)} />
+                          </p>
                           <p className="text-3xl font-bold text-green-600">{latestAnalysis.estimationData.timeline}</p>
                           <p className="text-xs text-slate-600 mt-2">weeks ({latestAnalysis.estimationData.teamSize} devs)</p>
                         </div>
                         {latestAnalysis.estimationData.totalBudget && (
                           <div className="p-4 bg-white rounded-lg border border-slate-200">
-                            <p className="text-sm text-slate-600 mb-1">Total Budget</p>
+                            <p className="text-sm text-slate-600 mb-1">
+                              Total Budget <InfoTip align="right" note={calculationNotes.budget(latestAnalysis.estimationData)} />
+                            </p>
                             <p className="text-3xl font-bold text-purple-600">${(latestAnalysis.estimationData.totalBudget / 1000).toFixed(1)}K</p>
                             <p className="text-xs text-slate-600 mt-2">estimated cost</p>
                           </div>
@@ -770,6 +829,7 @@ export default function DashboardPage() {
                       <div className="mt-4 p-3 bg-blue-100 rounded border border-blue-300">
                         <p className="text-sm text-blue-900">
                           <strong>Confidence:</strong> {latestAnalysis.estimationData.confidence}%
+                          <InfoTip note={calculationNotes.confidence(latestAnalysis.estimationData)} />
                         </p>
                       </div>
                     </div>
@@ -821,6 +881,7 @@ export default function DashboardPage() {
                 devManDays={latestAnalysis.devManDays}
                 complexityScore={latestAnalysis.complexityScore}
                 analysisId={latestAnalysis.id}
+                requirementTitle={latestAnalysis.title}
                 estimationData={latestAnalysis.estimationData}
               />
             ) : (

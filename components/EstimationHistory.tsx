@@ -3,6 +3,26 @@
 import { useState, useEffect } from "react";
 import { authFetch } from "@/lib/auth-fetch";
 import { supabase } from "@/lib/supabase";
+import { formatCurrency, formatDuration, getProposedManDays } from "@/lib/estimation-calculator";
+import InfoTip from "./InfoTip";
+import { calculationNotes } from "@/lib/calculation-notes";
+import type { ComprehensiveDetails } from "@/lib/estimation-team";
+import EstimationGanttChart from "./EstimationGanttChart";
+import { DetailsSections } from "./EstimationReport";
+
+// The latest estimation saved from the Proposed Estimation tab
+interface SavedEstimation {
+  totalEffort: number;
+  timeline: number;
+  teamSize: number;
+  totalBudget?: number;
+  costPerHour?: number;
+  confidence?: number;
+  riskLevel?: string;
+  testingLevel?: string;
+  createdAt?: string;
+  breakdown?: { details?: ComprehensiveDetails } | null;
+}
 
 interface EstimationData {
   id: string;
@@ -17,6 +37,7 @@ interface EstimationData {
   totalManDays: number;
   devTeamDays: number;
   qaTeamDays: number;
+  saved?: SavedEstimation;
 }
 
 export default function EstimationHistory() {
@@ -44,9 +65,9 @@ export default function EstimationHistory() {
         if (response.ok) {
           const data = await response.json();
           const estimatedData = data.map((req: any) => {
-            // Use same formula as Proposed Estimation tab for consistency
-            const qaManDays = req.complexityScore * 0.5;
-            const devManDays = req.complexityScore * 0.8;
+            // Same numbers as the Proposed Estimation tab: from the saved
+            // detailed estimation when there is one, else M × 0.5 / M × 0.8
+            const { qaManDays, devManDays } = getProposedManDays(req.complexityScore, req.estimationData);
 
             const totalManDays = qaManDays + devManDays;
             const devTeamDays = Math.ceil(devManDays / 2);
@@ -65,6 +86,7 @@ export default function EstimationHistory() {
               totalManDays,
               devTeamDays,
               qaTeamDays,
+              saved: req.estimationData && req.estimationData.timeline ? req.estimationData : undefined,
             };
           });
 
@@ -182,12 +204,18 @@ export default function EstimationHistory() {
                   <p className="text-xs text-slate-500 mt-1">
                     {new Date(est.createdAt).toLocaleDateString()}
                   </p>
+                  {est.saved && (
+                    <span className="inline-block mt-1 text-[11px] font-semibold px-2 py-0.5 rounded bg-indigo-100 text-indigo-800">
+                      📊 Detailed estimation saved
+                    </span>
+                  )}
                 </div>
 
                 <div className="col-span-1 text-center">
                   <span className="inline-block px-2 py-1 bg-white rounded text-sm font-semibold text-slate-900">
                     {est.complexityScore}
                   </span>
+                  <InfoTip note={calculationNotes.complexity(est.nodesCount, est.edgesCount, est.paths, est.complexityScore)} />
                   <p className="text-xs text-slate-600 mt-1">
                     {getComplexityLevel(est.complexityScore)}
                   </p>
@@ -196,6 +224,7 @@ export default function EstimationHistory() {
                 <div className="col-span-2 text-right">
                   <p className="font-bold text-lg text-blue-600">
                     ~{Math.round(est.qaManDays)}
+                    <InfoTip align="right" note={calculationNotes.qa(est.complexityScore, est.saved)} />
                   </p>
                   <p className="text-xs text-slate-600">man days</p>
                 </div>
@@ -203,6 +232,7 @@ export default function EstimationHistory() {
                 <div className="col-span-2 text-right">
                   <p className="font-bold text-lg text-green-600">
                     ~{Math.round(est.devManDays)}
+                    <InfoTip align="right" note={calculationNotes.dev(est.complexityScore, est.saved)} />
                   </p>
                   <p className="text-xs text-slate-600">man days</p>
                 </div>
@@ -210,21 +240,93 @@ export default function EstimationHistory() {
                 <div className="col-span-2 text-right">
                   <p className="font-bold text-lg text-purple-600">
                     ~{Math.round(est.totalManDays)}
+                    <InfoTip align="right" note={calculationNotes.total(est.complexityScore, est.saved)} />
                   </p>
                   <p className="text-xs text-slate-600">man days</p>
                 </div>
 
                 <div className="col-span-2 text-right">
-                  <p className="font-semibold text-slate-900">
-                    ~{Math.max(est.devTeamDays, est.qaTeamDays)} days
-                  </p>
-                  <p className="text-xs text-slate-600">parallel execution</p>
+                  {est.saved ? (
+                    <>
+                      <p className="font-semibold text-indigo-700">
+                        {est.saved.timeline} weeks
+                        <InfoTip align="right" note={calculationNotes.timeline(est.saved)} />
+                      </p>
+                      <p className="text-xs text-slate-600">saved estimation</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-semibold text-slate-900">
+                        ~{Math.max(est.devTeamDays, est.qaTeamDays)} days
+                        <InfoTip align="right" note={calculationNotes.quickTimeline(est.devManDays, est.qaManDays)} />
+                      </p>
+                      <p className="text-xs text-slate-600">parallel execution</p>
+                    </>
+                  )}
                 </div>
               </div>
 
               {/* Expanded Row - Details */}
               {selectedRow === est.id && (
-                <div className="border-t border-slate-200 bg-white bg-opacity-50 p-4 space-y-4">
+                <div
+                  className="border-t border-slate-200 bg-white bg-opacity-50 p-4 space-y-4 cursor-default"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Saved detailed estimation */}
+                  {est.saved && (
+                    <div className="space-y-4 pb-4 border-b border-slate-200">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <h3 className="text-lg font-bold text-slate-900">📊 Saved Estimation</h3>
+                        {est.saved.createdAt && (
+                          <span className="text-xs text-slate-500">
+                            Saved {new Date(est.saved.createdAt).toLocaleString()}
+                          </span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="p-3 bg-white rounded border border-slate-200">
+                          <p className="text-xs text-slate-600 font-semibold">
+                            Total Effort <InfoTip note={calculationNotes.totalEffort(est.saved)} />
+                          </p>
+                          <p className="text-2xl font-bold text-blue-600">{est.saved.totalEffort} h</p>
+                        </div>
+                        <div className="p-3 bg-white rounded border border-slate-200">
+                          <p className="text-xs text-slate-600 font-semibold">
+                            Timeline <InfoTip note={calculationNotes.timeline(est.saved)} />
+                          </p>
+                          <p className="text-2xl font-bold text-indigo-600">{formatDuration(est.saved.timeline)}</p>
+                        </div>
+                        <div className="p-3 bg-white rounded border border-slate-200">
+                          <p className="text-xs text-slate-600 font-semibold">Team</p>
+                          <p className="text-2xl font-bold text-slate-900">{est.saved.teamSize} devs</p>
+                          {est.saved.breakdown?.details && (
+                            <p className="text-xs text-slate-500">{est.saved.breakdown.details.totalPeople} people in total</p>
+                          )}
+                        </div>
+                        <div className="p-3 bg-white rounded border border-slate-200">
+                          <p className="text-xs text-slate-600 font-semibold">
+                            {est.saved.totalBudget ? "Budget" : "Confidence"}
+                            <InfoTip
+                              align="right"
+                              note={est.saved.totalBudget ? calculationNotes.budget(est.saved) : calculationNotes.confidence(est.saved)}
+                            />
+                          </p>
+                          <p className="text-2xl font-bold text-green-600">
+                            {est.saved.totalBudget ? formatCurrency(est.saved.totalBudget) : `${est.saved.confidence ?? "-"}%`}
+                          </p>
+                          {est.saved.totalBudget && est.saved.confidence !== undefined && (
+                            <p className="text-xs text-slate-500">Confidence {est.saved.confidence}%</p>
+                          )}
+                        </div>
+                      </div>
+                      <EstimationGanttChart estimation={est.saved} />
+                      {est.saved.breakdown?.details && <DetailsSections details={est.saved.breakdown.details} />}
+                    </div>
+                  )}
+
+                  {est.saved && (
+                    <p className="text-sm font-semibold text-slate-700">Requirement graph</p>
+                  )}
                   {/* Metrics */}
                   <div className="grid grid-cols-4 gap-4">
                     <div className="p-3 bg-white rounded border border-slate-200">
@@ -261,7 +363,8 @@ export default function EstimationHistory() {
                     </div>
                   </div>
 
-                  {/* Team Breakdown */}
+                  {/* Quick team breakdown: only without a saved detailed estimation */}
+                  {!est.saved && (<>
                   <div className="grid grid-cols-3 gap-4 pt-2 border-t border-slate-200">
                     <div className="p-3 bg-blue-50 rounded">
                       <p className="text-sm font-semibold text-blue-900 mb-2">
@@ -312,6 +415,7 @@ export default function EstimationHistory() {
                       <strong>Dev Calculation:</strong> M × 0.8 = {est.complexityScore} × 0.8 = ~{Math.round(est.devManDays)} man days
                     </p>
                   </div>
+                  </>)}
 
                   {/* Delete Button */}
                   <button

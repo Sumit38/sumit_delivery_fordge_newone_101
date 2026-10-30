@@ -57,7 +57,7 @@ export default function AnalysisResults() {
             <span className="text-sm font-bold text-blue-600">1</span>
             <div>
               <p className="text-sm font-semibold text-slate-900">Enter Requirement</p>
-              <p className="text-xs text-slate-600">Paste, upload (.txt), or web link</p>
+              <p className="text-xs text-slate-600">Paste, upload (.txt, .pdf, .docx), or web link</p>
             </div>
           </div>
           <div className="flex gap-3">

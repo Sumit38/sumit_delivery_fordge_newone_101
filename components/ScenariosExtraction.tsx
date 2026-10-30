@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { authFetch } from "@/lib/auth-fetch";
 import { supabase } from "@/lib/supabase";
+import { downloadTestScenariosExcel } from "@/lib/export-test-scenarios";
 
 interface Scenario {
   id: number;
@@ -47,6 +48,19 @@ export default function ScenariosExtraction({
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [error, setError] = useState("");
+  const [downloading, setDownloading] = useState(false);
+
+  const downloadExcel = async () => {
+    setDownloading(true);
+    setError("");
+    try {
+      await downloadTestScenariosExcel({ scenarios, requirementTitle, requirementText, complexity });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Download failed");
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   const extractScenarios = async () => {
     setLoading(true);
@@ -180,6 +194,13 @@ export default function ScenariosExtraction({
               ✓ <strong>Extraction Complete!</strong> {scenarios.length} scenarios extracted successfully.
             </p>
           </div>
+          <button
+            onClick={downloadExcel}
+            disabled={downloading}
+            className="w-full px-4 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-slate-400 font-semibold transition-colors"
+          >
+            {downloading ? "Preparing Excel..." : "📥 Download Test Scenarios (Excel)"}
+          </button>
           <button
             onClick={onClose}
             className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition-colors"

@@ -3,6 +3,11 @@
 import { useState } from "react";
 import { authFetch } from "@/lib/auth-fetch";
 import { supabase } from "@/lib/supabase";
+import {
+  readRequirementFile,
+  REQUIREMENT_FILE_ACCEPT,
+  REQUIREMENT_FILE_LABEL,
+} from "@/lib/read-requirement-file";
 
 interface RefinedQuestion {
   id: string;
@@ -52,73 +57,7 @@ export default function AnalysisForm({ onComplete, onRefineRequired }: AnalysisF
     }
   };
 
-  const extractTextFromFile = async (file: File): Promise<string> => {
-    const fileType = file.type;
-    const fileName = file.name.toLowerCase();
-
-    // Plain text files
-    if (fileType === "text/plain" || fileName.endsWith(".txt")) {
-      return await file.text();
-    }
-
-    // PDF files
-    if (fileType === "application/pdf" || fileName.endsWith(".pdf")) {
-      try {
-        const arrayBuffer = await file.arrayBuffer();
-        const response = await authFetch("/api/extract-pdf", {
-          method: "POST",
-          headers: { "Content-Type": "application/octet-stream" },
-          body: arrayBuffer,
-        });
-        if (!response.ok) throw new Error("Failed to extract PDF");
-        const data = await response.json();
-        return data.text;
-      } catch (err) {
-        throw new Error(
-          "Failed to extract PDF text. Please ensure PDF contains readable text."
-        );
-      }
-    }
-
-    // Word documents
-    if (
-      fileType ===
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-      fileName.endsWith(".docx")
-    ) {
-      try {
-        const arrayBuffer = await file.arrayBuffer();
-        const response = await authFetch("/api/extract-docx", {
-          method: "POST",
-          headers: { "Content-Type": "application/octet-stream" },
-          body: arrayBuffer,
-        });
-        if (!response.ok) throw new Error("Failed to extract DOCX");
-        const data = await response.json();
-        return data.text;
-      } catch (err) {
-        throw new Error(
-          "Failed to extract Word document. Please ensure file is a valid DOCX."
-        );
-      }
-    }
-
-    // CSV/Excel files
-    if (
-      fileType === "text/csv" ||
-      fileName.endsWith(".csv") ||
-      fileName.endsWith(".xlsx") ||
-      fileName.endsWith(".xls")
-    ) {
-      throw new Error(
-        "Excel/CSV files are not supported. Please save as .txt file first."
-      );
-    }
-
-    throw new Error(
-      "Unsupported file type. Supported formats: .txt, .pdf, .docx"
-    );
-  };
+  const extractTextFromFile = (file: File): Promise<string> => readRequirementFile(file);
 
   const extractTextFromWebsite = async (url: string): Promise<string> => {
     try {
@@ -195,7 +134,7 @@ export default function AnalysisForm({ onComplete, onRefineRequired }: AnalysisF
     // Validate requirement content (either upload or paste)
     if (!requirementText.trim()) {
       setError(
-        "❌ Please either upload a file (.txt) or paste your requirement text"
+        "❌ Please either upload a file (.txt, .pdf, .docx) or paste your requirement text"
       );
       return;
     }
@@ -414,7 +353,7 @@ export default function AnalysisForm({ onComplete, onRefineRequired }: AnalysisF
                     )}
                   </p>
                   <p className="text-xs text-slate-500 mt-2">
-                    Supported: .txt files only
+                    Supported: {REQUIREMENT_FILE_LABEL}
                   </p>
                 </div>
                 <input
@@ -422,7 +361,7 @@ export default function AnalysisForm({ onComplete, onRefineRequired }: AnalysisF
                   onChange={handleFileUpload}
                   disabled={loading || fileLoading}
                   className="hidden"
-                  accept=".txt,.text/plain"
+                  accept={REQUIREMENT_FILE_ACCEPT}
                 />
               </label>
               {fileLoading && (
@@ -498,7 +437,7 @@ export default function AnalysisForm({ onComplete, onRefineRequired }: AnalysisF
         <h3 className="font-semibold text-blue-900 mb-2">✓ Both methods are tracked equally:</h3>
         <ol className="text-sm text-blue-800 space-y-1 ml-4 list-decimal">
           <li>
-            <strong>Upload file</strong> (.txt) OR <strong>Paste text</strong> - both tracked in audit trail
+            <strong>Upload file</strong> (.txt, .pdf, .docx) OR <strong>Paste text</strong> - both tracked in audit trail
           </li>
           <li>Our AI analyzes to identify decision points and paths</li>
           <li>Nodes (states) and edges (transitions) are extracted</li>
@@ -512,17 +451,17 @@ export default function AnalysisForm({ onComplete, onRefineRequired }: AnalysisF
         <h3 className="font-semibold text-green-900 mb-2">✅ Supported Input Methods:</h3>
         <ul className="text-sm text-green-800 space-y-1">
           <li>✅ <strong>Paste Text</strong> - Copy-paste from any source (recommended)</li>
-          <li>✅ <strong>.txt files</strong> - Plain text documents</li>
+          <li>✅ <strong>.txt, .pdf, .docx files</strong> - Text, PDF and Word documents</li>
           <li>✅ <strong>Website URLs</strong> - Public webpages (text extraction)</li>
         </ul>
       </div>
 
       {/* For Other Formats */}
       <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-        <h3 className="font-semibold text-blue-900 mb-2">📋 For Word, PDF, Excel & Other Files:</h3>
+        <h3 className="font-semibold text-blue-900 mb-2">📋 For Excel, scanned PDFs & Other Files:</h3>
         <p className="text-sm text-blue-800 mb-2">Simply copy the text and paste it:</p>
         <ol className="text-sm text-blue-800 space-y-1 ml-4 list-decimal">
-          <li>Open your document (PDF, Word, Excel, etc.)</li>
+          <li>Open your document (Excel, scanned PDF, etc.)</li>
           <li>Select all text (Ctrl+A or Cmd+A)</li>
           <li>Copy (Ctrl+C or Cmd+C)</li>
           <li>Return here and select "📝 Paste Text" tab</li>

@@ -4,8 +4,15 @@ import {
   getTestFactor,
   getRiskFactor,
   getDeadlineFactor,
-  EstimationFactors,
 } from "./estimation-questions";
+import {
+  calculateComprehensive,
+  countRoles,
+  seniorityFactor,
+  type ComprehensiveDetails,
+  type TeamAnswers,
+  type TestingAnswers,
+} from "./estimation-team";
 
 export interface EstimationResult {
   baseEffort: number;
@@ -25,14 +32,26 @@ export interface EstimationResult {
     testFactor: number;
     riskFactor: number;
     deadlineFactor: number;
+    // Present only for estimations made with the team and testing questions
+    details?: ComprehensiveDetails;
   };
   assumptions: string[];
 }
 
+export interface EstimationContext {
+  paths?: number;
+  testScenarios?: number;
+}
+
 export function calculateEstimation(
   complexityScore: number,
-  answers: Record<number, any>
+  answers: Record<string, any>,
+  context: EstimationContext = {}
 ): EstimationResult {
+  if (answers?.team && answers?.testing) {
+    return calculateComprehensiveEstimation(complexityScore, answers, context);
+  }
+
   // Extract answers
   const skillLevel = answers[1];
   const teamSize = answers[2] || 4;
@@ -108,6 +127,96 @@ export function calculateEstimation(
   };
 }
 
+// Uses the team composition and testing answers instead of a single
+// "number of developers" and "testing level".
+function calculateComprehensiveEstimation(
+  complexityScore: number,
+  answers: Record<string, any>,
+  context: EstimationContext
+): EstimationResult {
+  const team = answers.team as TeamAnswers;
+  const testing = answers.testing as TestingAnswers;
+  const skillLevel = answers[1];
+  const availability = Number(answers[3]) || 40;
+  const techFamiliarity = answers[4];
+  const riskTolerance = answers[6];
+  const deadline = answers[7];
+  const costPerHour = answers[8] || undefined;
+
+  const techFactor = getTechFactor(techFamiliarity);
+  const riskFactor = getRiskFactor(riskTolerance);
+  const deadlineFactor = getDeadlineFactor(deadline);
+
+  const { totalEffort, timeline, devBase, details } = calculateComprehensive({
+    complexityScore,
+    paths: context.paths,
+    testScenarios: context.testScenarios,
+    availability,
+    techFactor,
+    riskFactor,
+    deadlineFactor,
+    team,
+    testing,
+  });
+
+  const developers = countRoles(team.roles);
+
+  // Average developer seniority, weighted by headcount
+  const devRoles = Object.values(team.roles || {}).filter((r) => (Number(r.count) || 0) > 0);
+  const skillFactor = developers
+    ? Math.round(
+        (devRoles.reduce((s, r) => s + seniorityFactor(r.seniority) * Number(r.count), 0) / developers) * 100
+      ) / 100
+    : getSkillFactor(skillLevel);
+  const testFactor = details.devHours
+    ? Math.round(((details.devHours + details.testingHours) / details.devHours) * 100) / 100
+    : 1;
+
+  let confidence = 75;
+  if (skillFactor <= 0.85) confidence += 10;
+  if (skillFactor >= 1.4) confidence -= 10;
+  if (riskFactor >= 1.2) confidence += 10;
+  if (riskFactor <= 0.8) confidence -= 15;
+  const types = testing.testTypes || [];
+  if (types.includes("Functional") && types.includes("Regression")) confidence += 5;
+  for (const g of details.gaps) confidence -= g.severity === "high" ? 8 : g.severity === "medium" ? 4 : 0;
+  confidence = Math.max(40, Math.min(95, confidence));
+
+  const testingLevel = `Custom: ${types.length} test type${types.length === 1 ? "" : "s"}`;
+  const roleSummary = devRoles.length
+    ? Object.entries(team.roles)
+        .filter(([, r]) => (Number(r.count) || 0) > 0)
+        .map(([id, r]) => `${r.count} ${r.seniority} ${id}`)
+        .join(", ")
+    : "none";
+
+  const assumptions = [
+    `Project complexity score of ${complexityScore} used as baseline (M = E - N + 2P)`,
+    `Developers: ${developers} (${roleSummary}); testers: ${countRoles(testing.testers)}; support roles: ${countRoles(team.support)}`,
+    `Work areas: ${(team.workstreams || []).join(", ") || "none selected"}`,
+    `Test types: ${types.join(", ") || "none selected"}; approach: ${details.testApproach}`,
+    `Availability: ${availability} hours per week per person`,
+    `Technology familiarity: ${techFamiliarity}; risk approach: ${riskTolerance}; deadline: ${deadline}`,
+    ...details.formulas,
+  ];
+
+  return {
+    baseEffort: devBase,
+    totalEffort,
+    timeline,
+    teamSize: developers,
+    costPerHour,
+    totalBudget: costPerHour ? Math.round(totalEffort * costPerHour) : undefined,
+    riskLevel: riskTolerance,
+    skillLevel: skillLevel || "Mixed",
+    techFamiliarity,
+    testingLevel,
+    confidence,
+    breakdown: { skillFactor, techFactor, testFactor, riskFactor, deadlineFactor, details },
+    assumptions,
+  };
+}
+
 function calculateConfidenceScore(
   skillFactor: number,
   riskFactor: number,
@@ -165,6 +274,38 @@ function buildAssumptions(params: {
   );
 
   return assumptions;
+}
+
+export interface ProposedManDays {
+  devManDays: number;
+  qaManDays: number;
+  supportManDays: number;
+  fromEstimation: boolean; // true when based on the team and testing answers
+}
+
+// Dev and QA man-days shown across the app. Once an estimation with the team
+// and testing questions exists, they come from it (development + defect
+// fixing for Dev, every testing activity for QA). Otherwise the quick
+// estimate from the complexity score is used: Dev = M × 0.8, QA = M × 0.5.
+export function getProposedManDays(
+  complexityScore: number,
+  estimation?: { breakdown?: { details?: ComprehensiveDetails } | null } | null
+): ProposedManDays {
+  const d = estimation?.breakdown?.details;
+  if (d && d.mode === "comprehensive") {
+    return {
+      devManDays: (d.devHours + d.defectFixHours) / 8,
+      qaManDays: d.testingHours / 8,
+      supportManDays: d.overheadHours / 8,
+      fromEstimation: true,
+    };
+  }
+  return {
+    devManDays: complexityScore * 0.8,
+    qaManDays: complexityScore * 0.5,
+    supportManDays: 0,
+    fromEstimation: false,
+  };
 }
 
 export function getEstimationCategory(

@@ -9,20 +9,26 @@ import { EstimationReport } from "./EstimationReport";
 interface EstimationTabProps {
   requirementId: string;
   complexityScore: number;
+  paths?: number;
+  testScenarios?: number;
   onEstimationComplete?: (estimation: any) => void;
+  onViewHistory?: () => void;
 }
 
 export function EstimationTab({
   requirementId,
   complexityScore,
+  paths,
+  testScenarios,
   onEstimationComplete,
+  onViewHistory,
 }: EstimationTabProps) {
   const [showForm, setShowForm] = useState(false);
   const [estimation, setEstimation] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const handleGenerateEstimation = async (answers: Record<number, any>) => {
+  const handleGenerateEstimation = async (answers: Record<string, any>) => {
     setLoading(true);
     setError("");
 
@@ -43,6 +49,8 @@ export function EstimationTab({
         body: JSON.stringify({
           requirementId,
           complexityScore,
+          paths,
+          testScenarios,
           estimationAnswers: answers,
         }),
       });
@@ -106,7 +114,12 @@ export function EstimationTab({
   if (estimation) {
     return (
       <div className="p-6">
-        <EstimationReport estimation={estimation} onReset={handleReset} />
+        <EstimationReport
+          estimation={estimation}
+          onReset={handleReset}
+          savedToHistory
+          onViewHistory={onViewHistory}
+        />
       </div>
     );
   }
@@ -123,8 +136,9 @@ export function EstimationTab({
             <span className="font-bold text-blue-600">{complexityScore}</span>.
           </p>
           <p className="text-gray-600 mb-6">
-            Answer a set of targeted questions about your team, resources, and
-            project requirements to get accurate effort and budget estimates.
+            Answer questions in three steps: the project, the team you have
+            (which developers, how many, how senior) and how you will test.
+            Every hour in the result comes from those answers.
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
@@ -155,7 +169,7 @@ export function EstimationTab({
             onClick={() => setShowForm(true)}
             className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition flex items-center gap-2"
           >
-            🚀 Start Estimation (8 questions)
+            🚀 Start Estimation (3 steps)
           </button>
         </div>
       </div>
@@ -163,6 +177,7 @@ export function EstimationTab({
       {showForm && (
         <EstimationQuestionsForm
           complexityScore={complexityScore}
+          testScenarios={testScenarios || (paths ? paths * 2 : undefined)}
           onSubmit={handleGenerateEstimation}
           onCancel={() => setShowForm(false)}
         />

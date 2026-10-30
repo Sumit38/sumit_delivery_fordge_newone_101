@@ -3,16 +3,35 @@
 import { useMemo, useState } from "react";
 import { authFetch } from "@/lib/auth-fetch";
 import { supabase } from "@/lib/supabase";
+import type { ComprehensiveDetails } from "@/lib/estimation-team";
+import { buildEstimationGantt, ganttColor } from "@/lib/estimation-gantt";
+import EstimationGanttChart from "./EstimationGanttChart";
+import InfoTip from "./InfoTip";
+import { calculationNotes } from "@/lib/calculation-notes";
+import { downloadTimelineExcel } from "@/lib/export-timeline";
+import type { TimelineExportInput } from "@/lib/timeline-excel";
+
+// Tailwind colours of the quick timeline's phases, for the Excel download
+const PHASE_HEX: Record<string, string> = {
+  "bg-blue-500": "#3b82f6",
+  "bg-green-500": "#22c55e",
+  "bg-yellow-500": "#eab308",
+  "bg-purple-500": "#a855f7",
+  "bg-orange-500": "#f97316",
+  "bg-slate-300": "#cbd5e1",
+};
 
 interface TimelineProps {
   qaManDays: number;
   devManDays: number;
   complexityScore: number;
   analysisId?: string;
+  requirementTitle?: string;
   estimationData?: {
     totalEffort: number;
     timeline: number;
     teamSize: number;
+    breakdown?: { details?: ComprehensiveDetails } | null;
   };
 }
 
@@ -21,14 +40,24 @@ export default function ProposedProjectTimeline({
   devManDays,
   complexityScore,
   analysisId,
+  requirementTitle,
   estimationData,
 }: TimelineProps) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  // The Excel download appears once the timeline has been saved
+  const [hasSaved, setHasSaved] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
-  // Use detailed estimation if available, otherwise use basic metrics
-  const effectiveDevManDays = estimationData ? (estimationData.totalEffort / 8) * 0.7 : devManDays; // 70% for dev
-  const effectiveQaManDays = estimationData ? (estimationData.totalEffort / 8) * 0.3 : qaManDays; // 30% for QA
+  // Use detailed estimation if available, otherwise use basic metrics.
+  // With team and testing answers, Dev and QA come straight from the estimation.
+  const details = estimationData?.breakdown?.details;
+  const effectiveDevManDays = details
+    ? (details.devHours + details.defectFixHours) / 8
+    : estimationData ? (estimationData.totalEffort / 8) * 0.7 : devManDays; // 70% for dev
+  const effectiveQaManDays = details
+    ? details.testingHours / 8
+    : estimationData ? (estimationData.totalEffort / 8) * 0.3 : qaManDays; // 30% for QA
 
   // Get team size for parallel work calculation
   const teamSize = estimationData?.teamSize || 3; // Default to 3 if not specified
@@ -136,7 +165,10 @@ export default function ProposedProjectTimeline({
     return "Very High complexity - consider splitting into multiple releases";
   };
 
-  const saveTimeline = async () => {
+  const saveTimeline = async (
+    totalDays: number = timeline.totalDays,
+    phases: Array<Record<string, unknown>> = timeline.phases
+  ) => {
     if (!analysisId) {
       alert("No analysis to save timeline for");
       return;
@@ -157,11 +189,11 @@ export default function ProposedProjectTimeline({
         },
         body: JSON.stringify({
           analysisId,
-          totalDays: timeline.totalDays,
-          qaManDays,
-          devManDays,
+          totalDays,
+          qaManDays: estimationData ? effectiveQaManDays : qaManDays,
+          devManDays: estimationData ? effectiveDevManDays : devManDays,
           complexityScore,
-          phases: timeline.phases,
+          phases,
         }),
       });
 
@@ -171,6 +203,7 @@ export default function ProposedProjectTimeline({
       }
 
       setSaved(true);
+      setHasSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
       alert("Failed to save: " + (err instanceof Error ? err.message : "Unknown error"));
@@ -178,6 +211,151 @@ export default function ProposedProjectTimeline({
       setSaving(false);
     }
   };
+
+  const downloadExcel = async (input: Omit<TimelineExportInput, "requirementTitle" | "complexityScore">) => {
+    setDownloading(true);
+    try {
+      await downloadTimelineExcel({ ...input, requirementTitle: requirementTitle || "Project", complexityScore });
+    } catch (err) {
+      alert("Download failed: " + (err instanceof Error ? err.message : "Unknown error"));
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const downloadButton = (input: Omit<TimelineExportInput, "requirementTitle" | "complexityScore">) =>
+    hasSaved && (
+      <button
+        type="button"
+        onClick={() => downloadExcel(input)}
+        disabled={downloading}
+        className="w-full px-4 py-3 rounded-lg font-semibold border-2 border-green-600 text-green-700 bg-white hover:bg-green-50 disabled:opacity-50 transition-colors"
+      >
+        {downloading ? "Preparing Excel..." : "📥 Download Timeline (Excel)"}
+      </button>
+    );
+
+  const saveButton = (onSave: () => void) =>
+    analysisId && (
+      <button
+        onClick={onSave}
+        disabled={saving}
+        className={`w-full px-4 py-3 rounded-lg font-semibold transition-colors ${
+          saved ? "bg-green-600 text-white" : "bg-blue-600 text-white hover:bg-blue-700 disabled:bg-slate-400"
+        }`}
+      >
+        {saving ? (
+          <div className="flex items-center justify-center gap-2">
+            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+            Saving...
+          </div>
+        ) : saved ? (
+          "✓ Saved Successfully"
+        ) : (
+          "💾 Save Project Timeline"
+        )}
+      </button>
+    );
+
+  // Once an estimation exists, show exactly the same Gantt chart and numbers
+  // as the estimation report, so the two screens never disagree.
+  if (estimationData?.timeline) {
+    const gantt = buildEstimationGantt(estimationData);
+    const weeks = estimationData.timeline;
+    const totalDays = weeks * 5;
+    const devRows = gantt.rows.filter((r) => r.kind === "dev" || (r.group === "Development"));
+    const testRows = gantt.rows.filter((r) => r.group === "Testing" || r.kind === "test");
+    const span = (rows: typeof gantt.rows) =>
+      rows.length ? Math.max(...rows.map((r) => r.end)) - Math.min(...rows.map((r) => r.start)) : 0;
+    const devDays = Math.ceil(span(devRows) * 5);
+    const qaDays = Math.ceil(span(testRows) * 5);
+    const testers = details ? details.testLoads.filter((l) => l.role !== "unstaffed").reduce((s, l) => s + l.count, 0) : null;
+    const phases = gantt.rows.map((r) => ({
+      name: r.label,
+      group: r.group,
+      startDay: Math.round(r.start * 5),
+      days: Math.round((r.end - r.start) * 5 * 10) / 10,
+      color: ganttColor(r.kind),
+      percentage: ((r.end - r.start) / weeks) * 100,
+    }));
+
+    return (
+      <div className="space-y-6">
+        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <p className="text-sm text-blue-900">
+            <strong>Complexity Level:</strong> {getComplexityRecommendation(complexityScore)}
+          </p>
+          <p className="text-xs text-blue-800 mt-1">
+            This timeline is the same as your saved estimation{details ? " (team, seniority and testing answers)" : ""}.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="p-4 bg-slate-50 rounded-lg">
+            <p className="text-2xl font-bold text-slate-900">{totalDays}</p>
+            <p className="text-xs text-slate-600 mt-1">Total working days</p>
+          </div>
+          <div className="p-4 bg-slate-50 rounded-lg">
+            <p className="text-2xl font-bold text-slate-900">
+              {weeks}
+              <InfoTip note={calculationNotes.timeline(estimationData)} />
+            </p>
+            <p className="text-xs text-slate-600 mt-1">Weeks (@ 5 days/week)</p>
+          </div>
+          <div className="p-4 bg-slate-50 rounded-lg">
+            <p className="text-2xl font-bold text-slate-900">
+              ~{devDays}
+              <InfoTip note={calculationNotes.dev(complexityScore, estimationData)} />
+            </p>
+            <p className="text-xs text-slate-600 mt-1">Dev calendar days</p>
+            <p className="text-xs text-slate-500 mt-1">
+              ({estimationData.teamSize} developers · {Math.round(effectiveDevManDays)} man-days)
+            </p>
+          </div>
+          <div className="p-4 bg-slate-50 rounded-lg">
+            <p className="text-2xl font-bold text-slate-900">
+              ~{qaDays}
+              <InfoTip align="right" note={calculationNotes.qa(complexityScore, estimationData)} />
+            </p>
+            <p className="text-xs text-slate-600 mt-1">QA calendar days</p>
+            <p className="text-xs text-slate-500 mt-1">
+              ({testers !== null ? `${testers} tester${testers === 1 ? "" : "s"} · ` : ""}
+              {Math.round(effectiveQaManDays)} man-days)
+            </p>
+          </div>
+        </div>
+
+        <EstimationGanttChart estimation={estimationData} />
+
+        {saveButton(() => saveTimeline(totalDays, phases))}
+        {downloadButton({
+          totalWeeks: weeks,
+          totalDays,
+          devManDays: effectiveDevManDays,
+          qaManDays: effectiveQaManDays,
+          source: details ? "estimation" : "quick",
+          rows: gantt.rows.map((r) => ({
+            label: r.label,
+            group: r.group,
+            start: r.start,
+            end: r.end,
+            color: ganttColor(r.kind),
+            note: r.note,
+          })),
+          milestones: gantt.milestones,
+          details,
+        })}
+      </div>
+    );
+  }
+
+  // Phases of the quick timeline run one after another
+  let cursorDays = 0;
+  const quickRows = timeline.phases.map((p) => {
+    const start = cursorDays / 5;
+    cursorDays += p.days;
+    return { label: p.name, group: "Phases", start, end: cursorDays / 5, color: PHASE_HEX[p.color] || "#3b82f6" };
+  });
 
   return (
     <div className="space-y-6">
@@ -345,7 +523,7 @@ export default function ProposedProjectTimeline({
       {/* Save Button */}
       {analysisId && (
         <button
-          onClick={saveTimeline}
+          onClick={() => saveTimeline()}
           disabled={saving}
           className={`w-full px-4 py-3 rounded-lg font-semibold transition-colors ${
             saved
@@ -365,6 +543,15 @@ export default function ProposedProjectTimeline({
           )}
         </button>
       )}
+
+      {downloadButton({
+        totalWeeks: Math.max(timeline.weeksTotal, Math.ceil(cursorDays / 5)),
+        totalDays: timeline.totalDays,
+        devManDays: effectiveDevManDays,
+        qaManDays: effectiveQaManDays,
+        source: "quick",
+        rows: quickRows,
+      })}
     </div>
   );
 }

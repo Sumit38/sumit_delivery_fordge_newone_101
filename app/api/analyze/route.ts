@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
-import { analyzeRequirementComplexity } from "@/lib/complexity-analyzer";
+import { analyzeRequirementComplexity, createTimeoutFallback, type ComplexityAnalysis } from "@/lib/complexity-analyzer";
 import { requireUser } from "@/lib/require-user";
 import { checkRateLimit } from "@/lib/rate-limit";
 
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
     console.log("🔍 [4/5] Analyzing requirement complexity...");
 
     // ✅ STEP 4: Claude API Analysis with retry logic
-    let analysis;
+    let analysis: ComplexityAnalysis | null | undefined;
     let analysisAttempts = 0;
     const maxAttempts = 2;
     let lastError: any = null;
@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
           setTimeout(() => reject(new Error("Analysis timeout - Claude API took too long")), 50000)
         );
 
-        analysis = await Promise.race([analysisPromise, timeoutPromise]);
+        analysis = (await Promise.race([analysisPromise, timeoutPromise])) as ComplexityAnalysis;
         console.log("✅ [4/5] Complexity analysis successful");
       } catch (analysisError: any) {
         lastError = analysisError;
@@ -153,31 +153,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Use fallback if all attempts failed
+    // Use the requirement-aware estimate if all attempts failed (e.g. timeout)
     if (!analysis) {
-      console.error("⚠️ [4/5] All analysis attempts failed, using fallback");
-      analysis = {
-        nodes: ["Start", "Input", "Process", "Output", "End"],
-        edges: [
-          { from: "Start", to: "Input", condition: "initialize" },
-          { from: "Input", to: "Process", condition: "submit" },
-          { from: "Process", to: "Output", condition: "complete" },
-          { from: "Output", to: "End", condition: "finish" },
-        ],
-        paths: [["Start", "Input", "Process", "Output", "End"]],
-        nodesCount: 5,
-        edgesCount: 4,
-        connectedComponents: 1,
-        complexityScore: 0,
-        testScenarios: 5,
-        analysis: `Fallback analysis (API error: ${lastError?.message || "unknown"})`,
-        decisionPoints: ["Input", "Process"],
-        alternativePaths: 1,
-        reasoning: `Attempted ${analysisAttempts} times but failed due to network/protocol error`,
-        confidenceScore: 20,
-        confidenceReason: "Fallback estimate - primary analysis failed",
-        analyzedScenarios: undefined,
-      };
+      console.error(`⚠️ [4/5] All analysis attempts failed (${lastError?.message || "unknown"}), using requirement-based estimate`);
+      analysis = createTimeoutFallback(requirementText);
     }
 
     // Ensure analysis is always a valid ComplexityAnalysis object

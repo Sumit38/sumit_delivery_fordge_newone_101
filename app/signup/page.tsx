@@ -16,6 +16,7 @@ export default function SignupPage() {
   });
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [confirmEmail, setConfirmEmail] = useState("");
   const [error, setError] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -96,11 +97,22 @@ export default function SignupPage() {
       }
 
       setSuccess(true);
-      setTimeout(() => {
-        router.push("/login");
-      }, 2000);
+      if (data.needsConfirmation) {
+        // Supabase requires the email link to be clicked before the first sign-in
+        setConfirmEmail(formData.email);
+      } else {
+        setTimeout(() => {
+          router.push("/login");
+        }, 2000);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Signup failed");
+      const message = err instanceof Error ? err.message : "Signup failed";
+      // Supabase rejects addresses it can't deliver to, such as example.com test addresses
+      setError(
+        /email address .* is invalid/i.test(message)
+          ? "This email address can't receive mail. Please use a real email address (test domains such as example.com are not accepted)."
+          : message
+      );
     } finally {
       setLoading(false);
     }
@@ -117,7 +129,25 @@ export default function SignupPage() {
                 <span className="text-3xl">✓</span>
               </div>
               <h3 className="text-2xl font-bold text-slate-900 mb-2">Account Created!</h3>
-              <p className="text-slate-600 mb-4">Redirecting to login...</p>
+              {confirmEmail ? (
+                <div className="max-w-sm">
+                  <p className="text-slate-700 mb-2">
+                    📧 We sent a confirmation link to <strong>{confirmEmail}</strong>.
+                  </p>
+                  <p className="text-slate-600 text-sm mb-4">
+                    Open it and click the link, then sign in. Check your spam folder if it doesn&apos;t arrive in a few minutes.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/login?email=${encodeURIComponent(confirmEmail)}`)}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
+                  >
+                    Go to Sign In
+                  </button>
+                </div>
+              ) : (
+                <p className="text-slate-600 mb-4">Redirecting to login...</p>
+              )}
             </div>
           </div>
         )}

@@ -3,6 +3,8 @@ import { requireUser } from "@/lib/require-user";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { Anthropic } from "@anthropic-ai/sdk";
 
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
   const auth = await requireUser(request);
   if (auth.error) return auth.error;
@@ -64,6 +66,26 @@ Generate a comprehensive use case with the following structure (respond ONLY wit
   "businessValue": "Why this use case is important",
   "kpis": [
     { "metric": "KPI Name", "target": "Target value", "currentState": "Current baseline" }
+  ],
+  "nonFunctionalRequirements": [
+    {
+      "category": "Performance | Security | Availability | Scalability | Usability | Compliance | Data Retention & Audit",
+      "requirement": "What the system must do, in one sentence",
+      "measure": "Measurable target, e.g. 'Page responds in under 2 seconds for 95% of requests'",
+      "priority": "Must | Should | Could",
+      "source": "Stated | Assumed"
+    }
+  ],
+  "fieldValidations": [
+    {
+      "screen": "Screen or form where the field appears",
+      "field": "Field name",
+      "type": "Text | Number | Email | Date | Dropdown | Checkbox | File | Password | Phone",
+      "mandatory": true,
+      "rules": "Validation rules: length, format, range, allowed values, uniqueness",
+      "errorMessage": "Exact message shown to the user when the rule fails",
+      "source": "Stated | Assumed"
+    }
   ]
 }
 
@@ -74,11 +96,14 @@ Rules:
 - Include at least 2 alternative flows
 - Include at least 1 exception flow
 - KPIs should be measurable and relevant
+- nonFunctionalRequirements: 5-8 items covering at least Performance, Security and Availability. Every "measure" must be testable (a number, time, percentage or standard). Use "Stated" only when the requirement says it; otherwise use a sensible industry default and mark it "Assumed"
+- fieldValidations: list every input field the actors enter in the main and alternative flows (up to 15). If the requirement names no fields, infer the fields the flow clearly needs and mark them "Assumed". Error messages must be clear and polite, and tell the user how to fix the input
+- Keep each text value short (one sentence) so the whole JSON stays compact
 - All fields should be non-empty and specific to the requirement`;
 
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 6000,
+      max_tokens: 8000,
       temperature: 0,
       messages: [
         {

@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { signIn } from "@/lib/auth";
+import { signIn, resendConfirmation } from "@/lib/auth";
 import Link from "next/link";
 
 export default function LoginPage() {
@@ -11,10 +11,23 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [unconfirmed, setUnconfirmed] = useState(false);
+  const [resending, setResending] = useState(false);
+
+  // Coming from sign-up (?email=) or from the confirmation link (?confirmed=1)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const fromSignup = params.get("email");
+    if (fromSignup) setEmail(fromSignup);
+    if (params.get("confirmed")) setNotice("✓ Your email is confirmed. You can sign in now.");
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setNotice("");
+    setUnconfirmed(false);
     setLoading(true);
 
     try {
@@ -26,9 +39,35 @@ export default function LoginPage() {
       await signIn(email, password);
       router.push("/dashboard");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      const message = err instanceof Error ? err.message : "Login failed";
+      if (/email not confirmed/i.test(message)) {
+        setUnconfirmed(true);
+        setError("Your email isn't confirmed yet. Open the confirmation email we sent and click the link, then sign in.");
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    setResending(true);
+    try {
+      await resendConfirmation(email);
+      setNotice(`📧 A new confirmation link was sent to ${email}. Check your inbox and spam folder.`);
+      setError("");
+      setUnconfirmed(false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not resend the email";
+      // Supabase's built-in mail sender allows only a few emails per hour
+      setError(
+        /rate limit/i.test(message)
+          ? "Too many emails were sent in the last hour, so a new link can't be sent yet. Use the link already sent, try again in about an hour, or ask an admin to confirm your account."
+          : message
+      );
+    } finally {
+      setResending(false);
     }
   };
 
@@ -78,10 +117,24 @@ export default function LoginPage() {
             />
           </div>
 
+          {notice && (
+            <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-green-800 text-sm">{notice}</div>
+          )}
+
           {/* Error */}
           {error && (
             <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
               ❌ {error}
+              {unconfirmed && (
+                <button
+                  type="button"
+                  onClick={handleResend}
+                  disabled={resending || !email}
+                  className="block mt-2 font-semibold text-blue-700 underline hover:text-blue-900 disabled:opacity-50"
+                >
+                  {resending ? "Sending..." : "Resend confirmation email"}
+                </button>
+              )}
             </div>
           )}
 

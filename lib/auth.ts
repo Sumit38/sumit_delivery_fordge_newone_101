@@ -49,9 +49,22 @@ export async function signIn(email: string, password: string) {
 
     return { success: true, user: data.user };
   } catch (error) {
-    console.error('Signin error:', error);
+    // Wrong password / unconfirmed email are shown on the page; a warning
+    // avoids the red error overlay in development for these expected cases
+    console.warn('Signin error:', error instanceof Error ? error.message : error);
     throw error;
   }
+}
+
+// Sends the sign-up confirmation email again
+export async function resendConfirmation(email: string) {
+  const { error } = await supabase.auth.resend({
+    type: 'signup',
+    email,
+    options: { emailRedirectTo: `${window.location.origin}/login?confirmed=1` },
+  });
+  if (error) throw error;
+  return { success: true };
 }
 
 export async function signOut() {

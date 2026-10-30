@@ -1,24 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
+import mammoth from "mammoth";
 import { requireUser } from "@/lib/require-user";
+import { cleanExtractedText, readUploadBuffer } from "@/lib/file-text-extract";
 
 export async function POST(request: NextRequest) {
   const auth = await requireUser(request);
   if (auth.error) return auth.error;
 
-  // DOCX support requires proper ZIP + XML parsing libraries
-  // For now, direct users to convert or paste instead
-  return NextResponse.json(
-    {
-      error: "DOCX support requires document conversion",
-      instructions: [
-        "1. Open the DOCX file in Microsoft Word or Google Docs",
-        "2. Copy all the text (Ctrl+A, then Ctrl+C)",
-        "3. Come back here and select 'Paste Text' tab",
-        "4. Paste the content there",
-        "",
-        "OR convert DOCX → PDF or TXT first, then upload"
-      ].join("\n"),
-    },
-    { status: 400 }
-  );
+  const upload = await readUploadBuffer(request);
+  if ("error" in upload) return upload.error;
+
+  try {
+    const { value } = await mammoth.extractRawText({ buffer: Buffer.from(upload.buffer) });
+    const cleaned = cleanExtractedText(value);
+
+    if (!cleaned) {
+      return NextResponse.json(
+        { error: "No readable text found in this Word document." },
+        { status: 422 }
+      );
+    }
+
+    return NextResponse.json({ text: cleaned });
+  } catch (error) {
+    console.error("DOCX extraction failed:", error);
+    return NextResponse.json(
+      { error: "Could not read this Word file. Please make sure it is a .docx (not the older .doc) file." },
+      { status: 422 }
+    );
+  }
 }

@@ -3,10 +3,8 @@
 import { useState, useEffect } from "react";
 import { authFetch } from "@/lib/auth-fetch";
 import { supabase } from "@/lib/supabase";
-
-interface AcceptanceCriteria {
-  criteria: string;
-}
+import type { PlanningAnswers, SprintPlan } from "@/lib/story-planning";
+import StoryPlanningChat, { type QuestionAnswer } from "./StoryPlanningChat";
 
 interface UserStory {
   id: string;
@@ -16,6 +14,21 @@ interface UserStory {
   acceptanceCriteria: string[];
   storyPoints: number;
   estimatedDays: number;
+  // Present for stories made in a Q&A session
+  type?: string;
+  persona?: string;
+  sprint?: number | null;
+  dependsOn?: string[];
+}
+
+interface PlanningSession {
+  planningAnswers: PlanningAnswers;
+  questionAnswers: QuestionAnswer[];
+}
+
+interface GenerateOptions extends Partial<PlanningSession> {
+  previousStories?: UserStory[];
+  feedback?: string;
 }
 
 interface UserStoriesProps {
@@ -35,31 +48,48 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [estimationMethod, setEstimationMethod] = useState<EstimationMethod>("fibonacci");
+  // "qa" shows the planning chat; "stories" shows the generated stories
+  const [view, setView] = useState<"qa" | "stories">("qa");
+  const [session, setSession] = useState<PlanningSession | null>(null);
+  const [sprintPlan, setSprintPlan] = useState<SprintPlan | null>(null);
+  const [feedback, setFeedback] = useState("");
+  const [refining, setRefining] = useState(false);
 
+  // Create a cache key
+  const cacheKey = `stories_${Buffer.from(requirementText).toString('base64').substring(0, 50)}_${complexityLevel}`;
+
+  // Show stories already made in this browser session; otherwise start the Q&A
   useEffect(() => {
-    generateStories();
-  }, [requirementText, complexityLevel]);
-
-  const generateStories = async () => {
-    if (!requirementText.trim()) return;
-
-    // Create a cache key
-    const cacheKey = `stories_${Buffer.from(requirementText).toString('base64').substring(0, 50)}_${complexityLevel}`;
-
-    // Check if stories are already cached in sessionStorage
-    const cachedStories = sessionStorage.getItem(cacheKey);
-    if (cachedStories) {
+    setError("");
+    setFeedback("");
+    for (const key of [`${cacheKey}_qa`, cacheKey]) {
+      const cached = sessionStorage.getItem(key);
+      if (!cached) continue;
       try {
-        const parsed = JSON.parse(cachedStories);
+        const parsed = JSON.parse(cached);
         setStories(parsed.stories);
         setSummary(parsed.summary);
+        setSprintPlan(parsed.sprintPlan || null);
+        setSession(parsed.session || null);
+        setView("stories");
         return;
       } catch (e) {
-        // If cache is corrupted, continue with API call
+        // If cache is corrupted, ignore it
       }
     }
+    setStories([]);
+    setSummary("");
+    setSprintPlan(null);
+    setSession(null);
+    setView("qa");
+  }, [requirementText, complexityLevel]);
 
-    setLoading(true);
+  const generateStories = async (options: GenerateOptions = {}) => {
+    if (!requirementText.trim()) return;
+    const planned = Boolean(options.planningAnswers);
+
+    if (options.feedback) setRefining(true);
+    else setLoading(true);
     setError("");
 
     try {
@@ -69,6 +99,14 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
         body: JSON.stringify({
           requirement: requirementText,
           complexity: complexityLevel,
+          ...(planned
+            ? {
+                planningAnswers: options.planningAnswers,
+                questionAnswers: options.questionAnswers || [],
+                previousStories: options.previousStories,
+                feedback: options.feedback,
+              }
+            : {}),
         }),
       });
 
@@ -78,19 +116,40 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
       }
 
       const data = await response.json();
+      const nextSession = planned
+        ? { planningAnswers: options.planningAnswers!, questionAnswers: options.questionAnswers || [] }
+        : null;
       setStories(data.stories);
       setSummary(data.summary);
+      setSprintPlan(data.sprintPlan || null);
+      setSession(nextSession);
+      setView("stories");
+      setFeedback("");
 
-      // Cache the results
-      sessionStorage.setItem(cacheKey, JSON.stringify({
+      // Cache the results (Q&A stories under their own key)
+      sessionStorage.setItem(planned ? `${cacheKey}_qa` : cacheKey, JSON.stringify({
         stories: data.stories,
         summary: data.summary,
+        sprintPlan: data.sprintPlan || null,
+        session: nextSession,
       }));
+      if (!planned) sessionStorage.removeItem(`${cacheKey}_qa`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate user stories");
     } finally {
       setLoading(false);
+      setRefining(false);
     }
+  };
+
+  const refineStories = () => {
+    if (!session || !feedback.trim()) return;
+    generateStories({ ...session, previousStories: stories, feedback: feedback.trim() });
+  };
+
+  const startNewSession = () => {
+    setError("");
+    setView("qa");
   };
 
   const saveUserStories = async () => {
@@ -194,16 +253,39 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
       <div className="text-center py-12">
         <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
         <p className="text-slate-600">Generating user stories...</p>
+        <p className="text-xs text-slate-500 mt-1">This can take up to a minute.</p>
       </div>
     );
   }
 
-  if (error) {
+  const errorBox = error ? (
+    <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+      <p className="text-red-700">❌ {error}</p>
+    </div>
+  ) : null;
+
+  if (view === "qa" && requirementText.trim()) {
     return (
-      <div className="p-6 bg-red-50 border border-red-200 rounded-lg">
-        <p className="text-red-700">❌ {error}</p>
+      <div className="space-y-4">
+        {errorBox}
+        {stories.length > 0 && (
+          <button type="button" onClick={() => setView("stories")} className="text-sm text-blue-600 hover:text-blue-800 font-semibold">
+            ← Back to current stories
+          </button>
+        )}
+        <StoryPlanningChat
+          requirementText={requirementText}
+          complexityLevel={complexityLevel}
+          initialAnswers={session?.planningAnswers}
+          onComplete={(planningAnswers, questionAnswers) => generateStories({ planningAnswers, questionAnswers })}
+          onSkip={() => generateStories()}
+        />
       </div>
     );
+  }
+
+  if (error && stories.length === 0) {
+    return errorBox;
   }
 
   if (stories.length === 0 && !loading) {
@@ -217,8 +299,71 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
     );
   }
 
+  const sprintWeeks = sprintPlan?.sprintLengthWeeks || 2;
+
   return (
     <div className="space-y-6">
+      {errorBox}
+
+      {/* Planning session bar */}
+      <div className="p-4 bg-white border border-slate-200 rounded-lg flex flex-wrap items-center gap-3">
+        <div className="flex-1 min-w-[200px] text-sm text-slate-700">
+          {session ? (
+            <>
+              🤖 Made in a planning session: {String(session.planningAnswers.sprintLength)} sprints,{" "}
+              {String(session.planningAnswers.velocity)} points per sprint, {String(session.planningAnswers.sprintCount)} sprints planned
+              {session.questionAnswers.length ? `, ${session.questionAnswers.length} requirement answers` : ""}.
+            </>
+          ) : (
+            <>Generated without a planning session. Answer a few questions to fit the stories to your sprints.</>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={startNewSession}
+          className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700"
+        >
+          🗣️ {session ? "Change answers" : "Start planning Q&A"}
+        </button>
+      </div>
+
+      {/* Sprint plan */}
+      {sprintPlan && (
+        <div className="p-4 bg-white border border-slate-200 rounded-lg">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+            <p className="font-semibold text-slate-900">🗓️ Sprint plan</p>
+            <p className="text-xs text-slate-600">
+              {sprintPlan.totalPoints} points in total · capacity {sprintPlan.velocity * sprintPlan.sprintCount} points (
+              {sprintPlan.velocity} × {sprintPlan.sprintCount} sprints) · about {sprintPlan.sprintCount * sprintWeeks} weeks
+            </p>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {sprintPlan.sprints.map((s) => {
+              const fill = Math.min(100, Math.round((s.points / sprintPlan.velocity) * 100));
+              return (
+                <div key={s.sprint} className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                  <div className="flex justify-between text-xs font-semibold text-slate-700">
+                    <span>Sprint {s.sprint}</span>
+                    <span className={s.points > sprintPlan.velocity ? "text-red-600" : ""}>
+                      {s.points}/{sprintPlan.velocity} pts
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-200 rounded-full h-1.5 my-2">
+                    <div className={`h-1.5 rounded-full ${s.points > sprintPlan.velocity ? "bg-red-500" : "bg-blue-600"}`} style={{ width: `${fill}%` }} />
+                  </div>
+                  <div className="text-xs text-slate-600">{s.storyIds.length ? s.storyIds.join(", ") : "Empty"}</div>
+                </div>
+              );
+            })}
+          </div>
+          {sprintPlan.backlog.length > 0 && (
+            <p className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2">
+              Backlog ({sprintPlan.backlogPoints} points, does not fit in {sprintPlan.sprintCount} sprints): {sprintPlan.backlog.join(", ")}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Estimation Method Selector */}
       <div className="p-4 bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg">
         <div className="space-y-3">
@@ -358,6 +503,14 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
                   >
                     {story.priority}
                   </span>
+                  {story.type && (
+                    <span className="text-xs px-2 py-1 rounded bg-indigo-100 text-indigo-800">{story.type}</span>
+                  )}
+                  {story.sprint !== undefined && (
+                    <span className="text-xs px-2 py-1 rounded bg-slate-200 text-slate-700">
+                      {story.sprint ? `Sprint ${story.sprint}` : "Backlog"}
+                    </span>
+                  )}
                 </div>
                 <h3 className="font-bold text-slate-900 text-sm">{story.title}</h3>
               </div>
@@ -376,6 +529,13 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
             {/* Acceptance Criteria (expanded) */}
             {expandedStory === story.id && (
               <div className="mt-3 pt-3 border-t border-current border-opacity-20">
+                {(story.persona || (story.dependsOn && story.dependsOn.length > 0)) && (
+                  <p className="text-xs text-slate-600 mb-2">
+                    {story.persona && <>👤 {story.persona}</>}
+                    {story.persona && story.dependsOn && story.dependsOn.length > 0 && " · "}
+                    {story.dependsOn && story.dependsOn.length > 0 && <>Depends on {story.dependsOn.join(", ")}</>}
+                  </p>
+                )}
                 <p className="text-xs font-semibold text-slate-900 mb-2">
                   Acceptance Criteria:
                 </p>
@@ -397,6 +557,33 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
           </div>
         ))}
       </div>
+
+      {/* Refine with the agent */}
+      {session && (
+        <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
+          <p className="font-semibold text-slate-900 text-sm mb-2">🤖 Ask the agent to change the stories</p>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") refineStories();
+              }}
+              placeholder='e.g. "Split US-003", "Add a story for audit logging", "Move reporting to Nice-to-Have"'
+              disabled={refining}
+              className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
+            />
+            <button
+              type="button"
+              onClick={refineStories}
+              disabled={refining || !feedback.trim()}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 disabled:bg-slate-400"
+            >
+              {refining ? "Updating..." : "Update stories"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Save Button */}
       {analysisId && (

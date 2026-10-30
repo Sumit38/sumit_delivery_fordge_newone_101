@@ -29,9 +29,97 @@ interface UseCaseQA {
   postconditions: string[];
   businessValue: string;
   kpis: Array<{ metric: string; target: string; currentState: string }>;
+  nonFunctionalRequirements?: Array<{
+    category: string;
+    requirement: string;
+    measure: string;
+    priority?: string;
+    source?: string;
+  }>;
+  fieldValidations?: Array<{
+    screen?: string;
+    field: string;
+    type: string;
+    mandatory: boolean | string;
+    rules: string;
+    errorMessage: string;
+    source?: string;
+  }>;
 }
 
-function buildUseCaseHTML(useCaseTitle: string, useCaseQA: UseCaseQA | null): string {
+function esc(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function buildNfrHtml(useCaseQA: UseCaseQA): string {
+  const items = Array.isArray(useCaseQA.nonFunctionalRequirements) ? useCaseQA.nonFunctionalRequirements : [];
+  if (!items.length) return "";
+
+  // Group by category so related requirements sit together
+  const groups = new Map<string, typeof items>();
+  items.forEach((nfr) => {
+    const key = nfr.category || "General";
+    groups.set(key, [...(groups.get(key) || []), nfr]);
+  });
+
+  let row = 0;
+  const rows = [...groups.entries()]
+    .map(([category, list]) =>
+      list
+        .map((nfr, i) => {
+          row += 1;
+          return `<tr>
+        <td>NFR-${String(row).padStart(2, "0")}</td>
+        ${i === 0 ? `<td rowspan="${list.length}"><strong>${esc(category)}</strong></td>` : ""}
+        <td>${esc(nfr.requirement)}</td>
+        <td>${esc(nfr.measure)}</td>
+        <td>${esc(nfr.priority || "Should")}</td>
+        <td><span class="tag ${nfr.source === "Stated" ? "stated" : "assumed"}">${esc(nfr.source || "Assumed")}</span></td>
+      </tr>`;
+        })
+        .join("")
+    )
+    .join("");
+
+  return `<p class="note">Quality attributes the solution must meet. Each has a measurable target so it can be tested. Items marked <em>Assumed</em> are industry defaults; please confirm them with the business.</p>
+    <table>
+      <tr><th>ID</th><th>Category</th><th>Requirement</th><th>Measure / Target</th><th>Priority</th><th>Source</th></tr>
+      ${rows}
+    </table>`;
+}
+
+function buildFieldValidationHtml(useCaseQA: UseCaseQA): string {
+  const items = Array.isArray(useCaseQA.fieldValidations) ? useCaseQA.fieldValidations : [];
+  if (!items.length) return "";
+
+  const isMandatory = (v: boolean | string) => v === true || String(v).toLowerCase() === "true" || String(v).toLowerCase() === "yes";
+  const rows = items
+    .map(
+      (f, i) => `<tr>
+        <td>FV-${String(i + 1).padStart(2, "0")}</td>
+        <td>${esc(f.screen || "-")}</td>
+        <td><strong>${esc(f.field)}</strong></td>
+        <td>${esc(f.type)}</td>
+        <td>${isMandatory(f.mandatory) ? "Yes" : "No"}</td>
+        <td>${esc(f.rules)}</td>
+        <td>${esc(f.errorMessage)}</td>
+        <td><span class="tag ${f.source === "Stated" ? "stated" : "assumed"}">${esc(f.source || "Assumed")}</span></td>
+      </tr>`
+    )
+    .join("");
+
+  return `<p class="note">Input rules for each field the user enters. These drive front-end and back-end validation and the negative test cases.</p>
+    <table class="compact">
+      <tr><th>ID</th><th>Screen</th><th>Field</th><th>Type</th><th>Mandatory</th><th>Validation Rules</th><th>Error Message</th><th>Source</th></tr>
+      ${rows}
+    </table>`;
+}
+
+export function buildUseCaseHTML(useCaseTitle: string, useCaseQA: UseCaseQA | null): string {
   const actorsHtml = useCaseQA
     ? useCaseQA.actors
         .map((actor) => `<li><strong>${actor.name}:</strong> ${actor.role}</li>`)
@@ -90,6 +178,9 @@ function buildUseCaseHTML(useCaseTitle: string, useCaseQA: UseCaseQA | null): st
         )
         .join("")
     : "";
+
+  const nfrHtml = useCaseQA ? buildNfrHtml(useCaseQA) : "";
+  const fieldValidationHtml = useCaseQA ? buildFieldValidationHtml(useCaseQA) : "";
 
   return `
     <!DOCTYPE html>
@@ -193,6 +284,30 @@ function buildUseCaseHTML(useCaseTitle: string, useCaseQA: UseCaseQA | null): st
             text-align: center;
           }
 
+          .note {
+            color: #555;
+            font-size: 12px;
+            margin-bottom: 8px;
+          }
+
+          table.compact td, table.compact th {
+            padding: 6px;
+            font-size: 11px;
+          }
+
+          .tag {
+            display: inline-block;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: bold;
+          }
+
+          .tag.stated { background: #e3f2fd; color: #0d47a1; }
+          .tag.assumed { background: #fff3e0; color: #e65100; }
+
+          tr { page-break-inside: avoid; }
+
           .use-case-id {
             color: #666;
             font-size: 12px;
@@ -263,6 +378,10 @@ function buildUseCaseHTML(useCaseTitle: string, useCaseQA: UseCaseQA | null): st
               ${kpisHtml}
             </table>
           </div>
+
+          ${nfrHtml ? `<div class="section"><h2>10. Non-Functional Requirements</h2>${nfrHtml}</div>` : ""}
+
+          ${fieldValidationHtml ? `<div class="section"><h2>${nfrHtml ? "11" : "10"}. Field Validations</h2>${fieldValidationHtml}</div>` : ""}
           `
               : `
           <div class="section">

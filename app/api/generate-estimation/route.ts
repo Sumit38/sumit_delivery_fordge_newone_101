@@ -41,7 +41,16 @@ export async function POST(request: NextRequest) {
     console.log("🔍 [3/4] Calculating estimation...");
 
     // Calculate estimation
-    const estimation = calculateEstimation(complexityScore, estimationAnswers);
+    // paths / testScenarios are optional; they size the testing effort when the
+    // team and testing questions were answered.
+    const toCount = (v: unknown) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n > 0 ? Math.min(Math.round(n), 10000) : undefined;
+    };
+    const estimation = calculateEstimation(complexityScore, estimationAnswers, {
+      paths: toCount(body.paths),
+      testScenarios: toCount(body.testScenarios),
+    });
 
     console.log("✅ [3/4] Estimation calculated successfully");
     console.log("🔍 [4/4] Saving to database...");

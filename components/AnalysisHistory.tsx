@@ -5,6 +5,8 @@ import { authFetch } from "@/lib/auth-fetch";
 import { supabase } from "@/lib/supabase";
 import ScenariosExtraction from "./ScenariosExtraction";
 import { exportUserStoriesToExcel } from "@/lib/export-user-stories";
+import { downloadTestScenariosExcel } from "@/lib/export-test-scenarios";
+import { buildFlowMermaid, buildPathTreeMermaid, downloadFlowDiagram } from "@/lib/flow-diagram";
 
 interface Analysis {
   id: string;
@@ -72,6 +74,16 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
   );
   const [showScenarios, setShowScenarios] = useState(false);
   const [scenarios, setScenarios] = useState<any[]>([]);
+  const [diagramLoadingId, setDiagramLoadingId] = useState<string | null>(null);
+
+  const fetchAnalysisDetails = async (requirementId: string) => {
+    const response = await authFetch(`/api/get-analysis-details?requirementId=${requirementId}`);
+    if (!response.ok) {
+      throw new Error("Failed to fetch analysis details");
+    }
+    const { data } = await response.json();
+    return data;
+  };
 
   useEffect(() => {
     const fetchAnalyses = async () => {
@@ -181,38 +193,17 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
     }
 
     try {
-      const response = await authFetch("/api/export-excel", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          scenarios,
-          requirementTitle: selectedAnalysis.title,
-          requirementText: selectedAnalysis.requirementText,
-          complexity: {
-            n: selectedAnalysis.nodesCount,
-            e: selectedAnalysis.edgesCount,
-            p: selectedAnalysis.paths || 1,
-            complexityScore: selectedAnalysis.complexityScore,
-          },
-        }),
+      await downloadTestScenariosExcel({
+        scenarios,
+        requirementTitle: selectedAnalysis.title,
+        requirementText: selectedAnalysis.requirementText,
+        complexity: {
+          n: selectedAnalysis.nodesCount,
+          e: selectedAnalysis.edgesCount,
+          p: selectedAnalysis.paths || 1,
+          complexityScore: selectedAnalysis.complexityScore,
+        },
       });
-
-      if (!response.ok) throw new Error("Download failed");
-
-      const contentDisposition = response.headers.get("content-disposition");
-      const filename = contentDisposition
-        ? contentDisposition.split("filename=")[1].replace(/"/g, "")
-        : "complexity-analysis.csv";
-
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
     } catch (err) {
       alert("Download failed: " + (err instanceof Error ? err.message : "Unknown error"));
     }
@@ -358,23 +349,13 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
                   onClick={async (e) => {
                     e.stopPropagation();
                     try {
-                      const { data: { session } } = await supabase.auth.getSession();
-                      if (!session) {
-                        alert("Not authenticated");
-                        return;
-                      }
-
-                      const response = await authFetch(`/api/get-analysis-details?requirementId=${analysis.id}`, {
-                        headers: {
-                          "Authorization": `Bearer ${session.access_token}`,
-                        },
-                      });
-
-                      if (!response.ok) {
-                        throw new Error("Failed to fetch analysis details");
-                      }
-
-                      const { data: analysisDetails } = await response.json();
+                      const analysisDetails = await fetchAnalysisDetails(analysis.id);
+                      // Add the Mermaid source so the downloaded file also carries the diagram
+                      analysisDetails.flowDiagram = {
+                        mermaid: buildFlowMermaid(analysisDetails.metrics?.nodes || [], analysisDetails.metrics?.edges || []),
+                        pathTreeMermaid: buildPathTreeMermaid(analysisDetails.metrics?.paths || []),
+                        howToView: "Paste the mermaid text into https://mermaid.live to view the diagram",
+                      };
 
                       const dataStr = JSON.stringify(analysisDetails, null, 2);
                       const blob = new Blob([dataStr], { type: 'application/json' });
@@ -392,6 +373,25 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
                   className="flex-1 px-3 py-2 text-sm bg-purple-50 text-purple-600 rounded hover:bg-purple-100 transition-colors border border-purple-200 font-medium"
                 >
                   📊 Download Analysis
+                </button>
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    setDiagramLoadingId(analysis.id);
+                    try {
+                      const analysisDetails = await fetchAnalysisDetails(analysis.id);
+                      await downloadFlowDiagram(analysisDetails);
+                    } catch (error) {
+                      console.error("Flow diagram error:", error);
+                      alert(error instanceof Error ? error.message : "Failed to build the flow diagram");
+                    } finally {
+                      setDiagramLoadingId(null);
+                    }
+                  }}
+                  disabled={diagramLoadingId === analysis.id}
+                  className="flex-1 px-3 py-2 text-sm bg-teal-50 text-teal-700 rounded hover:bg-teal-100 transition-colors border border-teal-200 font-medium disabled:opacity-60"
+                >
+                  {diagramLoadingId === analysis.id ? "⏳ Building..." : "🌳 Flow Diagram"}
                 </button>
                 <button
                   onClick={(e) => {

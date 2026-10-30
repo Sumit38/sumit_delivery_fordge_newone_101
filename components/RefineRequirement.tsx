@@ -2,6 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { authFetch } from "@/lib/auth-fetch";
+import {
+  readRequirementFile,
+  REQUIREMENT_FILE_ACCEPT,
+  REQUIREMENT_FILE_LABEL,
+} from "@/lib/read-requirement-file";
 
 interface Question {
   id: string;
@@ -58,18 +63,7 @@ export default function RefineRequirement({ onRefinementComplete, onAnalyzeRequi
     }
   }, []);
 
-  const extractTextFromFile = async (file: File): Promise<string> => {
-    const fileType = file.type;
-    const fileName = file.name.toLowerCase();
-
-    // Text files
-    if (fileType === "text/plain" || fileName.endsWith(".txt")) {
-      const text = await file.text();
-      return text;
-    }
-
-    throw new Error("Only .txt files are supported. Please upload a plain text file.");
-  };
+  const extractTextFromFile = (file: File): Promise<string> => readRequirementFile(file);
 
   const extractTextFromWebsite = async (url: string): Promise<string> => {
     try {
@@ -90,6 +84,8 @@ export default function RefineRequirement({ onRefinementComplete, onAnalyzeRequi
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    // Reset so picking the same file again still triggers onChange
+    e.target.value = "";
     if (!file) return;
 
     setFileLoading(true);
@@ -325,7 +321,7 @@ Generated from raw requirement: "${rawRequirement}"
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                📄 Upload .txt
+                📄 Upload File
               </button>
               <button
                 type="button"
@@ -363,21 +359,27 @@ Generated from raw requirement: "${rawRequirement}"
                 <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
                   <input
                     type="file"
-                    accept=".txt"
+                    accept={REQUIREMENT_FILE_ACCEPT}
                     onChange={handleFileUpload}
                     className="hidden"
                     id="file-upload"
                     disabled={fileLoading}
                   />
                   <label htmlFor="file-upload" className="cursor-pointer">
-                    <p className="text-sm font-medium text-slate-900">📄 Click to upload .txt file</p>
-                    <p className="text-xs text-slate-500 mt-1">or drag and drop</p>
+                    <p className="text-sm font-medium text-slate-900">
+                      {fileLoading ? "⏳ Reading file..." : "📄 Click to upload a requirement file"}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1">Text, PDF or Word document</p>
                   </label>
                 </div>
-                {uploadedFileName && (
-                  <p className="text-xs text-green-600 mt-2">✓ File loaded: {uploadedFileName}</p>
+                {uploadedFileName && !fileLoading && (
+                  <p className="text-xs text-green-600 mt-2">
+                    ✓ File loaded: {uploadedFileName} ({rawRequirement.length.toLocaleString()} characters)
+                  </p>
                 )}
-                <p className="text-xs text-slate-500 mt-2">Only plain text (.txt) files supported</p>
+                <p className="text-xs text-slate-500 mt-2">
+                  Supported: {REQUIREMENT_FILE_LABEL}. Scanned (image-only) PDFs can&apos;t be read; paste their text instead.
+                </p>
               </div>
             )}
 

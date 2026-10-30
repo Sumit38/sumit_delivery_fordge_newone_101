@@ -22,7 +22,13 @@ export async function POST(request: NextRequest) {
     const anon = createClient(url, anonKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
-    const { data, error } = await anon.auth.signUp({ email, password });
+    // The confirmation link brings the user back to this app (it must be in
+    // Supabase's allowed redirect URLs; otherwise Supabase uses its Site URL)
+    const { data, error } = await anon.auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo: `${request.nextUrl.origin}/login?confirmed=1` },
+    });
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
@@ -47,6 +53,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      needsConfirmation: !data.session,
       message: data.session ? "Signup successful" : "Check your email to confirm your account",
     });
   } catch (error) {

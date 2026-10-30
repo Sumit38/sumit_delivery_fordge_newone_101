@@ -1,181 +1,226 @@
 import { NextRequest, NextResponse } from "next/server";
+import ExcelJS from "exceljs";
 import { requireUser } from "@/lib/require-user";
+
+interface TestCaseInput {
+  id?: string;
+  name?: string;
+  steps?: string[];
+  expectedResult?: string;
+}
+
+interface ScenarioInput {
+  id?: number | string;
+  name?: string;
+  description?: string;
+  complexity?: string;
+  actors?: string[];
+  preconditions?: string[];
+  steps?: string[];
+  expectedResult?: string;
+  testCases?: TestCaseInput[];
+  isTemplate?: boolean;
+}
+
+const COMPLEXITY_MULTIPLIER: Record<string, number> = { Low: 1, Medium: 2, High: 3, "Very High": 4 };
+
+const HEADER_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F3A5F" } };
+const COMPLEXITY_FILL: Record<string, string> = {
+  Low: "FFE8F5E9",
+  Medium: "FFFFF8E1",
+  High: "FFFFF3E0",
+  "Very High": "FFFFEBEE",
+};
+
+const list = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((v) => typeof v === "string" && v.trim() !== "") : [];
+
+const numbered = (items: string[]) => items.map((s, i) => `${i + 1}. ${s}`).join("\n");
+
+function styleHeader(sheet: ExcelJS.Worksheet) {
+  const header = sheet.getRow(1);
+  header.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  header.fill = HEADER_FILL;
+  header.alignment = { vertical: "middle", wrapText: true };
+  header.height = 22;
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+  sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: sheet.columnCount } };
+}
+
+function styleBody(sheet: ExcelJS.Worksheet, complexityColumn?: string) {
+  sheet.eachRow((row, rowNumber) => {
+    if (rowNumber === 1) return;
+    row.alignment = { vertical: "top", wrapText: true };
+    row.eachCell((cell) => {
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFD9D9D9" } },
+        bottom: { style: "thin", color: { argb: "FFD9D9D9" } },
+        left: { style: "thin", color: { argb: "FFD9D9D9" } },
+        right: { style: "thin", color: { argb: "FFD9D9D9" } },
+      };
+    });
+    if (complexityColumn) {
+      const cell = row.getCell(complexityColumn);
+      const fill = COMPLEXITY_FILL[String(cell.value)];
+      if (fill) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill } };
+    }
+  });
+}
 
 export async function POST(request: NextRequest) {
   const auth = await requireUser(request);
   if (auth.error) return auth.error;
 
   try {
-    console.log("🔍 Generating comprehensive Excel export with all scenarios...");
-
     const { scenarios, requirementTitle, requirementText, complexity } = await request.json();
 
-    if (!scenarios || !Array.isArray(scenarios)) {
-      return NextResponse.json(
-        { error: "Scenarios data is required" },
-        { status: 400 }
-      );
+    if (!Array.isArray(scenarios) || scenarios.length === 0) {
+      return NextResponse.json({ error: "Scenarios data is required" }, { status: 400 });
     }
 
-    // Include all scenarios (both detailed and templates)
-    const validScenarios = scenarios.filter((s: any) =>
-      s.name && s.name.trim() !== "" &&
-      s.testCases && s.testCases.length > 0
+    const valid: ScenarioInput[] = scenarios.filter(
+      (s: ScenarioInput) => typeof s?.name === "string" && s.name.trim() !== ""
     );
 
-    // Separate detailed vs template scenarios
-    const detailedScenarios = validScenarios.filter((s: any) => !s.isTemplate);
-    const templateScenarios = validScenarios.filter((s: any) => s.isTemplate);
+    const n = Number(complexity?.n) || 0;
+    const e = Number(complexity?.e) || 0;
+    const p = Number(complexity?.p) || 1;
+    // Same formula the app uses everywhere: M = E - N + 2P
+    const m = e - n + 2 * p;
+    const level = m <= 10 ? "Low" : m <= 30 ? "Medium" : m <= 100 ? "High" : "Very High";
+    const totalTestCases = valid.reduce((sum, s) => sum + (s.testCases?.length || 0), 0);
 
-    // Calculate complexity score using McCabe's formula: M = E - N + 2P
-    const realComplexityScore = complexity.e - complexity.n + 2 * complexity.p;
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "DeliveryForge";
+    workbook.created = new Date();
 
-    // Create CSV content (Excel compatible)
-    let csvContent = "";
+    // ---- Sheet 1: Summary ----
+    const summary = workbook.addWorksheet("Summary");
+    summary.columns = [
+      { header: "Item", key: "item", width: 32 },
+      { header: "Value", key: "value", width: 90 },
+    ];
+    summary.addRows([
+      { item: "Requirement Title", value: requirementTitle || "Unnamed Requirement" },
+      { item: "Requirement (first 1,000 chars)", value: (requirementText || "").substring(0, 1000) },
+      { item: "Generated On", value: new Date().toLocaleString() },
+      { item: "Nodes (N)", value: n },
+      { item: "Edges (E)", value: e },
+      { item: "Paths (P)", value: p },
+      { item: "Complexity Score (M)", value: m },
+      { item: "Formula", value: `M = E - N + 2P = ${e} - ${n} + 2(${p}) = ${m}` },
+      { item: "Complexity Level", value: level },
+      { item: "Estimated Test Scenarios (2P)", value: 2 * p },
+      { item: "Scenarios in this file", value: valid.length },
+      { item: "Test Cases in this file", value: totalTestCases },
+      {
+        item: "Test Case Complexity Rule",
+        value: "Number of steps × scenario multiplier (Low 1, Medium 2, High 3, Very High 4)",
+      },
+    ]);
+    styleHeader(summary);
+    styleBody(summary);
+    summary.getColumn("item").font = { bold: true };
+    summary.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
 
-    // Header section
-    csvContent += `COMPLEXITY ANALYSIS - TEST SCENARIO & TEST CASES REPORT\n`;
-    csvContent += `\n`;
-    csvContent += `REQUIREMENT DETAILS\n`;
-    csvContent += `Title,${requirementTitle || "Unnamed Requirement"}\n`;
-    if (requirementText) {
-      csvContent += `Description,"${requirementText.substring(0, 500).replace(/"/g, '""')}"\n`;
-    }
-    csvContent += `Generated,${new Date().toISOString()}\n`;
-    csvContent += `\n`;
-
-    // Summary metrics
-    if (complexity) {
-      csvContent += `OVERALL COMPLEXITY METRICS\n`;
-      csvContent += `Nodes (N),${complexity.n}\n`;
-      csvContent += `Edges (E),${complexity.e}\n`;
-      csvContent += `Connected Components (P),${complexity.p}\n`;
-      csvContent += `Complexity Score (M),${realComplexityScore}\n`;
-      csvContent += `Formula,"M = E - N + 2P = ${complexity.e} - ${complexity.n} + 2(${complexity.p}) = ${realComplexityScore}"\n`;
-      csvContent += `\n`;
-      csvContent += `INTERPRETATION\n`;
-      csvContent += `Complexity Level,${realComplexityScore <= 10 ? "Low" : realComplexityScore <= 30 ? "Medium" : realComplexityScore <= 100 ? "High" : "Very High"}\n`;
-      csvContent += `Total Test Scenarios (2P),${2 * complexity.p}\n`;
-      csvContent += `\n`;
-    }
-
-    csvContent += `TEST SCENARIOS & TEST CASES\n`;
-    csvContent += `\n`;
-    csvContent += `SECTION 1: DETAILED SCENARIOS (${detailedScenarios.length} scenarios with full specification)\n`;
-    csvContent += `================================================================================\n`;
-    csvContent += `\n`;
-
-    // Hierarchical structure: Scenario → Preconditions → Test Cases → Steps → Expected Results
-    detailedScenarios.forEach((scenario: any, scenarioIdx: number) => {
-      const preconditions = scenario.preconditions.join(" | ");
-      const scenarioComplexityValue = scenario.complexity === "Low" ? 1 :
-                                       scenario.complexity === "Medium" ? 2 :
-                                       scenario.complexity === "High" ? 3 : 4;
-
-      // === SCENARIO HEADER ===
-      if (scenarioIdx > 0) csvContent += `\n`; // Only add newline before subsequent scenarios
-      csvContent += `================================================================================\n`;
-      csvContent += `SCENARIO #${scenarioIdx + 1}: ${scenario.name}\n`;
-      csvContent += `================================================================================\n`;
-      csvContent += `Complexity Level: ${scenario.complexity}\n`;
-      csvContent += `Description: ${scenario.description || "N/A"}\n`;
-      csvContent += `Preconditions: "${preconditions.replace(/"/g, '""')}"\n`;
-      csvContent += `\n`;
-
-      // TEST CASES FOR THIS SCENARIO
-      if (scenario.testCases && Array.isArray(scenario.testCases) && scenario.testCases.length > 0) {
-        csvContent += `TEST CASES FOR THIS SCENARIO:\n`;
-        csvContent += `\n`;
-
-        scenario.testCases.forEach((tc: any, tcIdx: number) => {
-          const stepCount = tc.steps.length || 1;
-          const testCaseComplexity = stepCount * scenarioComplexityValue;
-          const cleanTestCaseName = tc.name.replace(/\s*-\s*Path\s*\d+\s*$/, "");
-
-          // Test case header
-          csvContent += `--- Test Case #${tcIdx + 1}: ${cleanTestCaseName} ---\n`;
-          csvContent += `Preconditions: "${preconditions.replace(/"/g, '""')}"\n`;
-
-          // Numbered steps
-          if (tc.steps && tc.steps.length > 0) {
-            csvContent += `Steps:\n`;
-            tc.steps.forEach((step: string, stepIdx: number) => {
-              csvContent += `  ${stepIdx + 1}. ${step.replace(/"/g, '""')}\n`;
-            });
-          }
-
-          // Expected result
-          csvContent += `Expected Result: "${tc.expectedResult.replace(/"/g, '""')}"\n`;
-          csvContent += `Complexity Score: ${testCaseComplexity} (${stepCount} steps × ${scenarioComplexityValue}x ${scenario.complexity})\n`;
-          csvContent += `\n`;
-        });
-      }
-
-      // Blank line between scenarios
-      csvContent += `\n`;
-    });
-
-    // Template scenarios section
-    if (templateScenarios.length > 0) {
-      csvContent += `\n`;
-      csvContent += `================================================================================\n`;
-      csvContent += `SECTION 2: TEMPLATE SCENARIOS (${templateScenarios.length} scenarios - distributed across complexity levels)\n`;
-      csvContent += `================================================================================\n`;
-      csvContent += `\n`;
-      csvContent += `These template scenarios represent the remaining execution paths not fully detailed above.\n`;
-      csvContent += `They are organized by complexity level to match the expected distribution (20% Low, 35% Medium, 30% High, 15% Very High).\n`;
-      csvContent += `Each template can be expanded with specific test data and steps as needed during test execution.\n`;
-      csvContent += `\n`;
-
-      templateScenarios.forEach((scenario: any, scenarioIdx: number) => {
-        const preconditions = scenario.preconditions.join(" | ");
-
-        csvContent += `--- Template Scenario #${scenarioIdx + 1}: ${scenario.name} ---\n`;
-        csvContent += `Complexity Level: ${scenario.complexity}\n`;
-        csvContent += `Description: ${scenario.description}\n`;
-        csvContent += `Preconditions: "${preconditions.replace(/"/g, '""')}"\n`;
-        csvContent += `Actors: ${scenario.actors.join(", ")}\n`;
-        csvContent += `Expected Result: "${scenario.expectedResult.replace(/"/g, '""')}"\n`;
-        csvContent += `\n`;
-
-        if (scenario.testCases && scenario.testCases.length > 0) {
-          scenario.testCases.forEach((tc: any, tcIdx: number) => {
-            csvContent += `  Test Case #${tcIdx + 1}: ${tc.name}\n`;
-            csvContent += `  Steps: ${tc.steps.length} steps\n`;
-            csvContent += `  Expected: ${tc.expectedResult}\n`;
-            csvContent += `\n`;
-          });
-        }
+    // ---- Sheet 2: Test Scenarios ----
+    const scenarioSheet = workbook.addWorksheet("Test Scenarios");
+    scenarioSheet.columns = [
+      { header: "Scenario ID", key: "id", width: 12 },
+      { header: "Scenario Name", key: "name", width: 36 },
+      { header: "Complexity", key: "complexity", width: 12 },
+      { header: "Source", key: "source", width: 12 },
+      { header: "Description", key: "description", width: 50 },
+      { header: "Actors", key: "actors", width: 24 },
+      { header: "Preconditions", key: "preconditions", width: 40 },
+      { header: "Scenario Steps", key: "steps", width: 50 },
+      { header: "Expected Result", key: "expected", width: 40 },
+      { header: "No. of Test Cases", key: "tcCount", width: 14 },
+    ];
+    valid.forEach((s, i) => {
+      scenarioSheet.addRow({
+        id: `TS-${String(i + 1).padStart(3, "0")}`,
+        name: s.name,
+        complexity: s.complexity || "Medium",
+        source: s.isTemplate ? "Template" : "Detailed",
+        description: s.description || "",
+        actors: list(s.actors).join(", "),
+        preconditions: numbered(list(s.preconditions)),
+        steps: numbered(list(s.steps)),
+        expected: s.expectedResult || "",
+        tcCount: s.testCases?.length || 0,
       });
+    });
+    styleHeader(scenarioSheet);
+    styleBody(scenarioSheet, "complexity");
+
+    // ---- Sheet 3: Test Cases (one row per test case, ready for execution) ----
+    const caseSheet = workbook.addWorksheet("Test Cases");
+    caseSheet.columns = [
+      { header: "Test Case ID", key: "tcId", width: 14 },
+      { header: "Scenario ID", key: "scId", width: 12 },
+      { header: "Scenario Name", key: "scName", width: 30 },
+      { header: "Test Case Name", key: "name", width: 36 },
+      { header: "Complexity", key: "complexity", width: 12 },
+      { header: "Preconditions", key: "preconditions", width: 36 },
+      { header: "Test Steps", key: "steps", width: 55 },
+      { header: "Expected Result", key: "expected", width: 40 },
+      { header: "Test Case Complexity", key: "score", width: 14 },
+      { header: "Actual Result", key: "actual", width: 30 },
+      { header: "Status (Pass/Fail/Blocked)", key: "status", width: 16 },
+      { header: "Remarks", key: "remarks", width: 30 },
+    ];
+    valid.forEach((s, i) => {
+      const scId = `TS-${String(i + 1).padStart(3, "0")}`;
+      const scComplexity = s.complexity || "Medium";
+      const multiplier = COMPLEXITY_MULTIPLIER[scComplexity] || 2;
+      (s.testCases || []).forEach((tc, j) => {
+        const steps = list(tc.steps);
+        caseSheet.addRow({
+          tcId: `${scId}-TC${String(j + 1).padStart(2, "0")}`,
+          scId,
+          scName: s.name,
+          name: (tc.name || "").replace(/\s*-\s*Path\s*\d+\s*$/, ""),
+          complexity: scComplexity,
+          preconditions: numbered(list(s.preconditions)),
+          steps: numbered(steps),
+          expected: tc.expectedResult || "",
+          score: Math.max(steps.length, 1) * multiplier,
+          actual: "",
+          status: "",
+          remarks: "",
+        });
+      });
+    });
+    styleHeader(caseSheet);
+    styleBody(caseSheet, "complexity");
+    // Status column gets a dropdown so testers can record results in the file
+    for (let r = 2; r <= caseSheet.rowCount; r++) {
+      caseSheet.getCell(`K${r}`).dataValidation = {
+        type: "list",
+        allowBlank: true,
+        formulae: ['"Not Run,Pass,Fail,Blocked"'],
+      };
     }
 
-    // Complexity calculation guide
-    csvContent += `HOW COMPLEXITY IS CALCULATED\n`;
-    csvContent += `Scenario Complexity Level,Multiplier\n`;
-    csvContent += `Low,1x\n`;
-    csvContent += `Medium,2x\n`;
-    csvContent += `High,3x\n`;
-    csvContent += `Very High,4x\n`;
-    csvContent += `\n`;
-    csvContent += `Test Case Complexity = Number of Steps × Scenario Complexity Multiplier\n`;
-    csvContent += `Example: 5-step test case in Medium complexity scenario = 5 × 2 = Complexity Score of 10\n`;
+    const buffer = await workbook.xlsx.writeBuffer();
+    const safeTitle = String(requirementTitle || "test-scenarios")
+      .replace(/[^a-zA-Z0-9-_ ]/g, "")
+      .trim()
+      .replace(/\s+/g, "-")
+      .substring(0, 60) || "test-scenarios";
 
-    // Convert to Buffer
-    const buffer = Buffer.from(csvContent, "utf-8");
-
-    return new NextResponse(buffer, {
+    return new NextResponse(new Uint8Array(buffer as ArrayBuffer), {
       status: 200,
       headers: {
-        "Content-Type": "text/csv;charset=utf-8",
-        "Content-Disposition": `attachment; filename="test-scenarios-${Date.now()}.csv"`,
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="${safeTitle}-test-scenarios-${new Date().toISOString().split("T")[0]}.xlsx"`,
       },
     });
   } catch (error) {
     console.error("❌ Error generating Excel:", error);
     return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : "Failed to generate Excel",
-      },
+      { error: error instanceof Error ? error.message : "Failed to generate Excel" },
       { status: 500 }
     );
   }

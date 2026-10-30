@@ -85,6 +85,11 @@ export async function GET(request: NextRequest) {
             techFamiliarity: estimation.tech_familiarity,
             testingLevel: estimation.testing_level,
             confidence: estimation.confidence_score,
+            // Added for Estimation History: factors, team/testing details, assumptions
+            estimationId: estimation.id,
+            breakdown: estimation.breakdown || undefined,
+            assumptions: Array.isArray(estimation.assumptions) ? estimation.assumptions : undefined,
+            createdAt: estimation.created_at,
           } : undefined,
         };
       });
