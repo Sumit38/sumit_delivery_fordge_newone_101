@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseCompactGraph, createTimeoutFallback } from '@/lib/complexity-analyzer';
+import { parseCompactGraph, createTimeoutFallback, dedupeGraphLists } from '@/lib/complexity-analyzer';
+import { buildFlowMermaid, buildPathTreeMermaid } from '@/lib/flow-diagram';
 
 /**
  * Claude answers the complexity prompt in a compact ID format so the reply stays
@@ -60,6 +61,16 @@ describe('parseCompactGraph', () => {
     expect(g.paths).toHaveLength(2);
   });
 
+  it('drops a path that loops back through a node it already visited', () => {
+    const g = parseCompactGraph(ANSWER.replace('P2: START, N1, N2, N4, END', 'P2: START, N1, N2, N4, END\nP3: START, N1, N2, N1, N2, N3, END'))!;
+    expect(g.paths).toHaveLength(2);
+  });
+
+  it('keeps a repeated edge once', () => {
+    const g = parseCompactGraph(ANSWER.replace('N4 > END | rejected', 'N4 > END | rejected\nN2 > N3 | new file again'))!;
+    expect(g.edges).toHaveLength(6);
+  });
+
   it('adds an edge that a path uses but the edge list left out', () => {
     const g = parseCompactGraph(ANSWER.replace('N3 > END | stored\n', ''))!;
     expect(g.edges).toContainEqual({ from: 'Store file', to: 'End', condition: 'implied by path' });
@@ -68,6 +79,50 @@ describe('parseCompactGraph', () => {
 
   it('returns null for an answer that is not in the compact format', () => {
     expect(parseCompactGraph('NODES:\n- Start\n- End\nEDGES:\n- Start -> End')).toBeNull();
+  });
+});
+
+describe('dedupeGraphLists (older free-text answers)', () => {
+  it('removes repeated nodes, edges, paths, heading lines and loops', () => {
+    const r = dedupeGraphLists(
+      ['Start', 'Login', 'Login ', 'End'],
+      [
+        { from: 'Start', to: 'Login' },
+        { from: 'Start', to: ' Login' },
+        { from: 'Login', to: 'End' },
+      ],
+      [
+        ['### Path 1: Happy path'],
+        ['Start', 'Login', 'End'],
+        ['Start', ' Login', 'End'],
+        ['Start', 'Login', 'Start', 'Login', 'End'],
+      ]
+    );
+    expect(r.nodes).toEqual(['Start', 'Login', 'End']);
+    expect(r.edges).toHaveLength(2);
+    expect(r.paths).toEqual([['Start', 'Login', 'End']]);
+    expect(r.removed).toEqual({ nodes: 1, edges: 1, paths: 3, loops: 1 });
+  });
+
+  it('Mermaid diagrams draw a repeated edge or path only once', () => {
+    const flow = buildFlowMermaid(['Start', 'A', 'End'], [
+      { from: 'Start', to: 'A' },
+      { from: 'Start', to: 'A' },
+      { from: 'A', to: 'End' },
+    ]);
+    expect(flow.match(/-->/g)).toHaveLength(2);
+    expect(flow).not.toContain('{'); // Start no longer looks like a branch
+    const tree = buildPathTreeMermaid([['Start', 'A', 'End'], ['Start', 'A', 'End']])!;
+    expect(tree).toContain('✓ P1"');
+    expect(tree).not.toContain('P2');
+  });
+
+  it('leaves a clean graph unchanged', () => {
+    const g = parseCompactGraph(ANSWER)!;
+    const r = dedupeGraphLists(g.nodes, g.edges, g.paths);
+    expect(r.nodes).toEqual(g.nodes);
+    expect(r.edges).toEqual(g.edges);
+    expect(r.paths).toEqual(g.paths);
   });
 });
 

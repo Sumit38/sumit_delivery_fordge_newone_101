@@ -64,8 +64,16 @@ export function findBranchNodes(edges: FlowEdge[]): string[] {
 }
 
 // Control-flow graph: every node and edge from the analysis, drawn top to bottom.
-export function buildFlowMermaid(nodes: string[], edges: FlowEdge[]): string {
-  const allNodes = [...nodes];
+export function buildFlowMermaid(nodes: string[], inputEdges: FlowEdge[]): string {
+  // Older saved analyses can list the same edge twice; draw each arrow once
+  const seenEdges = new Set<string>();
+  const edges = inputEdges.filter((e) => {
+    const key = `${e.from}|${e.to}`;
+    if (seenEdges.has(key)) return false;
+    seenEdges.add(key);
+    return true;
+  });
+  const allNodes = [...new Set(nodes)];
   edges.forEach((e) => {
     if (!allNodes.includes(e.from)) allNodes.push(e.from);
     if (!allNodes.includes(e.to)) allNodes.push(e.to);
@@ -107,7 +115,12 @@ export function buildPathTreeMermaid(paths: string[][]): string | null {
   let counter = 0;
   const root: TrieNode = { id: "T0", label: paths[0][0] || "Start", children: new Map(), pathNos: [] };
 
+  const seenPaths = new Set<string>();
   paths.forEach((path, idx) => {
+    // Skip a path already drawn (older saved analyses can repeat one); numbers stay as listed
+    const key = path.join("|");
+    if (seenPaths.has(key)) return;
+    seenPaths.add(key);
     let current = root;
     path.slice(1).forEach((step) => {
       let child = current.children.get(step);

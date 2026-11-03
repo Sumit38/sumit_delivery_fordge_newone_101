@@ -331,7 +331,7 @@ M = E - N + 2P = number`,
     if (pathsMatch) {
       const pathLines = pathsMatch[1].split("\n");
       pathLines.forEach((line) => {
-        const cleaned = line.replace(/^[-•]\s*/, "").trim();
+        const cleaned = line.replace(/^[-•]\s*/, "").replace(/→/g, "->").trim();
         if (cleaned.length > 0 && !cleaned.startsWith("CALCULATION")) {
           const path = cleaned.split("->").map((p) => p.trim()).filter((p) => p.length > 0);
           if (path.length > 0) {
@@ -340,6 +340,19 @@ M = E - N + 2P = number`,
         }
       });
       console.log("✅ Paths parsed from structured format:", pathsList.length);
+    }
+
+    // Older free-text format: drop repeated nodes/edges/paths and heading lines,
+    // so they can't pad the lists (the compact parser already does this itself)
+    if (!compact) {
+      const unique = dedupeGraphLists(nodesList, edgesList, pathsList);
+      const { removed } = unique;
+      if (removed.nodes || removed.edges || removed.paths) {
+        console.log(`ℹ️ Removed duplicates: ${removed.nodes} nodes, ${removed.edges} edges, ${removed.paths} paths (${removed.loops} loops)`);
+      }
+      nodesList = unique.nodes;
+      edgesList = unique.edges;
+      pathsList.splice(0, pathsList.length, ...unique.paths);
     }
 
     // Aggressive extraction - try many formats
@@ -1389,6 +1402,68 @@ interface CompactGraph {
   stated: { n: number | null; e: number | null; p: number | null; m: number | null };
 }
 
+// Removes repeated entries so N, E and P are never inflated by duplicates:
+// - nodes and edges listed twice are kept once
+// - a path listed twice is kept once
+// - "paths" with fewer than 2 steps (headings such as "Path 1: Happy path") are dropped
+// - paths that visit the same node twice (loops) are dropped; P counts distinct Start-to-End routes
+// Labels are compared after trimming and collapsing spaces; case is kept, because
+// two node IDs with differently cased labels are separate nodes in the graph.
+export function dedupeGraphLists(
+  nodes: string[],
+  edges: Array<{ from: string; to: string; condition?: string }>,
+  paths: string[][]
+) {
+  const norm = (s: string) => String(s ?? "").replace(/\s+/g, " ").trim();
+
+  const nodeKeys = new Set<string>();
+  const uniqueNodes: string[] = [];
+  for (const node of nodes) {
+    const key = norm(node);
+    if (!key || nodeKeys.has(key)) continue;
+    nodeKeys.add(key);
+    uniqueNodes.push(node);
+  }
+
+  const edgeKeys = new Set<string>();
+  const uniqueEdges: typeof edges = [];
+  for (const edge of edges) {
+    const key = `${norm(edge.from)}|${norm(edge.to)}`;
+    if (!norm(edge.from) || !norm(edge.to) || edgeKeys.has(key)) continue;
+    edgeKeys.add(key);
+    uniqueEdges.push(edge);
+  }
+
+  const pathKeys = new Set<string>();
+  const uniquePaths: string[][] = [];
+  let loops = 0;
+  for (const path of paths) {
+    if (!Array.isArray(path)) continue;
+    const steps = path.map(norm).filter(Boolean);
+    if (steps.length < 2) continue;
+    if (new Set(steps).size !== steps.length) {
+      loops += 1;
+      continue;
+    }
+    const key = steps.join("|");
+    if (pathKeys.has(key)) continue;
+    pathKeys.add(key);
+    uniquePaths.push(path);
+  }
+
+  return {
+    nodes: uniqueNodes,
+    edges: uniqueEdges,
+    paths: uniquePaths,
+    removed: {
+      nodes: nodes.length - uniqueNodes.length,
+      edges: edges.length - uniqueEdges.length,
+      paths: paths.length - uniquePaths.length,
+      loops,
+    },
+  };
+}
+
 // Reads the compact answer format (START | Start, N1 > N2 | cond, P1: START, N1, END)
 // and turns IDs back into labels, so stored nodes/edges/paths keep the same shape as before.
 // Returns null when the answer is not in this format.
@@ -1453,6 +1528,8 @@ export function parseCompactGraph(text: string): CompactGraph | null {
     if (labels.length < 2 || labels.some((l) => !l)) continue;
     const route = labels as string[];
     if (route[0] !== "Start" || route[route.length - 1] !== "End") continue;
+    // A route that visits a node twice is a loop, not a distinct path; counting it would inflate P
+    if (new Set(route).size !== route.length) continue;
     const key = route.join("|");
     if (pathKeys.has(key)) continue;
     pathKeys.add(key);
