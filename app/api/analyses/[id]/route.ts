@@ -35,7 +35,8 @@ export async function DELETE(
     await supabaseServer
       .from("project_timelines")
       .delete()
-      .eq("requirement_id", id);
+      .eq("analysis_id", id)
+      .eq("user_id", userId);
 
     await supabaseServer
       .from("complexity_results")

@@ -5,22 +5,9 @@ import { authFetch } from "@/lib/auth-fetch";
 import { supabase } from "@/lib/supabase";
 import { downloadTestScenariosExcel } from "@/lib/export-test-scenarios";
 
-interface Scenario {
-  id: number;
-  name: string;
-  description: string;
-  complexity: "Low" | "Medium" | "High" | "Very High";
-  actors: string[];
-  preconditions: string[];
-  steps: string[];
-  expectedResult: string;
-  testCases: Array<{
-    id: string;
-    name: string;
-    steps: string[];
-    expectedResult: string;
-  }>;
-}
+import type { PathScenario, ScenarioCoverage } from "@/lib/path-scenarios";
+
+type Scenario = PathScenario;
 
 interface ScenariosExtractionProps {
   requirementId: string;
@@ -49,6 +36,8 @@ export default function ScenariosExtraction({
   const [expanded, setExpanded] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [downloading, setDownloading] = useState(false);
+  const [coverage, setCoverage] = useState<ScenarioCoverage | null>(null);
+  const [pathCountNote, setPathCountNote] = useState<string | null>(null);
 
   const downloadExcel = async () => {
     setDownloading(true);
@@ -72,14 +61,8 @@ export default function ScenariosExtraction({
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          requirementText,
-          requirementTitle,
-          n: complexity.n,
-          e: complexity.e,
-          p: complexity.p,
-          complexityScore: complexity.complexityScore,
-        }),
+        // Scenarios are built from this analysis' stored paths (2 per path)
+        body: JSON.stringify({ requirementId }),
       });
 
       if (!response.ok) {
@@ -89,6 +72,8 @@ export default function ScenariosExtraction({
 
       const data = await response.json();
       setScenarios(data.scenarios);
+      setCoverage(data.coverage || null);
+      setPathCountNote(data.pathCountNote || null);
       if (onScenariosExtracted) {
         onScenariosExtracted(data.scenarios);
       }
@@ -174,7 +159,7 @@ export default function ScenariosExtraction({
         >
           {loading
             ? "Extracting Scenarios..."
-            : `Extract ${2 * complexity.p} Test Scenarios (Positive + Negative)`}
+            : `Build ${2 * complexity.p} Test Scenarios from the ${complexity.p} Paths (Positive + Negative)`}
         </button>
       )}
 
@@ -189,10 +174,44 @@ export default function ScenariosExtraction({
       {/* Done Button - Blue to indicate extraction complete */}
       {scenarios.length > 0 && (
         <div className="space-y-3">
-          <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
             <p className="text-sm text-blue-900">
-              ✓ <strong>Extraction Complete!</strong> {scenarios.length} scenarios extracted successfully.
+              ✓ <strong>{scenarios.length} scenarios built from {coverage?.paths ?? complexity.p} paths</strong>{" "}
+              — one positive (P1+) and one negative (P1−) per path.
             </p>
+            {coverage && (
+              <p className={`text-xs ${coverage.ok ? "text-green-700" : "text-amber-800"}`}>
+                {coverage.ok
+                  ? `Coverage check passed: ${coverage.scenarios} = 2P, every path has both scenarios, and every branch of the graph is tested.`
+                  : [
+                      coverage.scenarios !== coverage.expected ? `${coverage.scenarios} scenarios vs 2P = ${coverage.expected}.` : "",
+                      coverage.pathsMissing.length ? `Missing scenarios for ${coverage.pathsMissing.join(", ")}.` : "",
+                      coverage.branchesUntested.length
+                        ? `${coverage.branchesUntested.length} branch(es) of the graph are on no listed path, so no scenario tests them: ${coverage.branchesUntested.slice(0, 4).join("; ")}${coverage.branchesUntested.length > 4 ? "; …" : ""}.`
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+              </p>
+            )}
+            {pathCountNote && <p className="text-xs text-amber-800">{pathCountNote}</p>}
+          </div>
+          <div className="max-h-80 overflow-y-auto border border-slate-200 rounded-lg divide-y">
+            {scenarios.map((s) => (
+              <details key={s.id} className="p-2 text-sm">
+                <summary className="cursor-pointer">
+                  <strong>{s.id}</strong> {s.name.replace(/^P\d+[+-]\s*/, "")}{" "}
+                  <span className="text-xs text-slate-500">({s.complexity})</span>
+                </summary>
+                <p className="text-xs text-slate-600 mt-1">
+                  <strong>Decision outcomes:</strong> {s.decisionOutcomes.join("; ") || "none"}
+                </p>
+                <ol className="list-decimal pl-5 text-xs text-slate-700 mt-1">
+                  {s.steps.map((step, i) => <li key={i}>{step}</li>)}
+                </ol>
+                <p className="text-xs text-slate-700 mt-1"><strong>Expected:</strong> {s.expectedResult}</p>
+              </details>
+            ))}
           </div>
           <button
             onClick={downloadExcel}

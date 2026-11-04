@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { requireUser } from "@/lib/require-user";
+import { pruneUserHistory } from "@/lib/history-retention";
 
 export async function POST(request: NextRequest) {
   try {
@@ -64,6 +65,8 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       );
     }
+
+    await pruneUserHistory(userId);
 
     return NextResponse.json({
       success: true,

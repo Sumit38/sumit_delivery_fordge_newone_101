@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { requireUser } from "@/lib/require-user";
+import { buildGraphBreakdown } from "@/lib/graph-breakdown";
+import { ambiguityNotes } from "@/lib/qa-status";
 
 export async function GET(request: NextRequest) {
   try {
@@ -61,6 +63,7 @@ export async function GET(request: NextRequest) {
         const result = req.complexity_results[0];
         const analysisData = result.analysis_data || {};
         const estimation = estimationMap.get(req.id);
+        const bd = buildGraphBreakdown(analysisData.nodes, analysisData.edges, analysisData.paths);
 
         return {
           id: req.id,
@@ -71,6 +74,18 @@ export async function GET(request: NextRequest) {
           nodesCount: result.nodes_count,
           edgesCount: result.edges_count,
           paths: analysisData.alternativePaths || 1,
+          // How N and E are made up, from the stored graph
+          analysisMode: analysisData.analysisMode || undefined,
+          breakdown: bd.nodes.total > 0 ? {
+            startEnd: bd.nodes.startEnd,
+            actions: bd.nodes.actions,
+            decisions: bd.nodes.decisions,
+            decisionList: bd.nodes.decisionList,
+            forwardEdges: bd.edges.forward,
+            loopBackEdges: bd.edges.loopBack,
+            graphRoutes: bd.paths.graphRoutes,
+            notes: [...ambiguityNotes(analysisData.ambiguities), ...bd.notes],
+          } : undefined,
           createdAt: req.created_at,
           requirementText: req.document_text || "",
           estimationData: estimation ? {

@@ -17,6 +17,17 @@ interface Analysis {
   nodesCount: number;
   edgesCount: number;
   paths?: number;
+  analysisMode?: "guided" | "hybrid" | "direct";
+  breakdown?: {
+    startEnd: number;
+    actions: number;
+    decisions: number;
+    decisionList: string[];
+    forwardEdges: number;
+    loopBackEdges: number;
+    graphRoutes: number | null;
+    notes: string[];
+  };
   createdAt: string;
   requirementText?: string;
   qaManDays?: number;
@@ -429,6 +440,15 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
                       <p className="text-sm font-semibold text-slate-900">
                         {selectedAnalysis.title}
                       </p>
+                      {/* Large trees don't fit in the report; this page shows them top to bottom */}
+                      <a
+                        href={`/path-tree?id=${encodeURIComponent(selectedAnalysis.id)}`}
+                        target="_blank"
+                        rel="noopener"
+                        className="inline-block mt-1 text-xs font-medium text-teal-700 hover:text-teal-900 underline"
+                      >
+                        🌲 Open path tree &amp; flow graph (full page) ↗
+                      </a>
                     </div>
 
                     {/* Section 1: Complexity Score */}
@@ -443,6 +463,18 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
                       <p className="text-xs text-slate-600 mt-1">
                         {getComplexityLevel(selectedAnalysis.complexityScore)} Complexity
                       </p>
+                      {selectedAnalysis.analysisMode && (
+                        <p className="text-xs text-slate-600 mt-1">
+                          Mode:{" "}
+                          <strong>
+                            {selectedAnalysis.analysisMode === "guided"
+                              ? "Guided (all questions answered)"
+                              : selectedAnalysis.analysisMode === "hybrid"
+                              ? "Hybrid (some answered, rest from AI suggestions)"
+                              : "Direct (no questions answered)"}
+                          </strong>
+                        </p>
+                      )}
                     </div>
 
                     {/* Section 2: Test Scenarios */}
@@ -544,18 +576,44 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
                           {selectedAnalysis.nodesCount}
                         </span>
                       </div>
+                      {selectedAnalysis.breakdown && (
+                        <div className="pl-4 text-xs text-slate-600 space-y-1">
+                          <div className="flex justify-between"><span>Start / End</span><span>{selectedAnalysis.breakdown.startEnd}</span></div>
+                          <div className="flex justify-between"><span>Action steps</span><span>{selectedAnalysis.breakdown.actions}</span></div>
+                          <div className="flex justify-between" title={selectedAnalysis.breakdown.decisionList.join(", ")}>
+                            <span>Decision points (more than one way out)</span><span>{selectedAnalysis.breakdown.decisions}</span>
+                          </div>
+                        </div>
+                      )}
                       <div className="flex justify-between p-2 bg-slate-50 rounded text-sm">
                         <span className="text-slate-600">Edges (E)</span>
                         <span className="font-semibold">
                           {selectedAnalysis.edgesCount}
                         </span>
                       </div>
+                      {selectedAnalysis.breakdown && (
+                        <div className="pl-4 text-xs text-slate-600 space-y-1">
+                          <div className="flex justify-between"><span>Forward transitions</span><span>{selectedAnalysis.breakdown.forwardEdges}</span></div>
+                          <div className="flex justify-between"><span>Loop-backs (retry / rework)</span><span>{selectedAnalysis.breakdown.loopBackEdges}</span></div>
+                        </div>
+                      )}
                       <div className="flex justify-between p-2 bg-slate-50 rounded text-sm">
                         <span className="text-slate-600">Paths (P)</span>
                         <span className="font-semibold">
                           {selectedAnalysis.paths || 1}
                         </span>
                       </div>
+                      <div className="p-2 bg-indigo-50 rounded text-xs font-mono text-indigo-900">
+                        M = E − N + 2P = {selectedAnalysis.edgesCount} − {selectedAnalysis.nodesCount} + 2({selectedAnalysis.paths || 1}) = {selectedAnalysis.complexityScore}
+                      </div>
+                      {selectedAnalysis.breakdown && selectedAnalysis.breakdown.notes.length > 0 && (
+                        <div className="p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-900">
+                          <p className="font-semibold mb-1">Checks</p>
+                          <ul className="list-disc pl-4 space-y-1">
+                            {selectedAnalysis.breakdown.notes.map((note, i) => <li key={i}>{note}</li>)}
+                          </ul>
+                        </div>
+                      )}
                     </div>
 
                     <div className="text-xs text-slate-500">

@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { signOut } from "@/lib/auth";
 import AnalysisResults from "@/components/AnalysisResults";
-import RefineRequirement from "@/components/RefineRequirement";
+import RefineRequirement, { type AnswerStatus } from "@/components/RefineRequirement";
+import CombineRequirements from "@/components/CombineRequirements";
 import AnalysisHistory from "@/components/AnalysisHistory";
 import EstimationHistory from "@/components/EstimationHistory";
 import SuggestiveUserStories from "@/components/SuggestiveUserStories";
@@ -62,6 +63,7 @@ export default function DashboardPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [incompleteAnalysisWarning, setIncompleteAnalysisWarning] = useState<{show: boolean; message: string; analysisData: any} | null>(null);
   const [estimationRefresh, setEstimationRefresh] = useState(false);
+  const [analyzeMode, setAnalyzeMode] = useState<"single" | "combine">("single");
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -123,7 +125,11 @@ export default function DashboardPage() {
     }, 300);
   };
 
-  const handleAnalyzeFromRefinement = async (refinedRequirement: string, title: string): Promise<void> => {
+  const handleAnalyzeFromRefinement = async (
+    refinedRequirement: string,
+    title: string,
+    questionsMetadata?: AnswerStatus[]
+  ): Promise<void> => {
     // Directly analyze from refinement page and go to history
     setIsTransitioning(true);
     try {
@@ -144,6 +150,8 @@ export default function DashboardPage() {
         body: JSON.stringify({
           requirementText: refinedRequirement,
           title: title || "Untitled Requirement",
+          // Which questions were answered vs skipped (guided / hybrid / direct)
+          ...(questionsMetadata?.length ? { questionsMetadata } : {}),
         }),
       });
 
@@ -640,6 +648,32 @@ export default function DashboardPage() {
                 </div>
               </div>
             )}
+            {/* Single requirement (default) or combine 2-3 documents */}
+            <div className="inline-flex rounded-lg border border-slate-300 bg-white p-1">
+              {([
+                ["single", "Single requirement"],
+                ["combine", "Combine 2–3 documents"],
+              ] as const).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setAnalyzeMode(mode)}
+                  className={`px-4 py-1.5 text-sm rounded-md font-medium transition-colors ${
+                    analyzeMode === mode ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {analyzeMode === "combine" ? (
+              <CombineRequirements
+                onOpenHistory={() => {
+                  setAnalyzeMode("single");
+                  handleAnalysisComplete();
+                }}
+              />
+            ) : (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               <div className="lg:col-span-2">
                 <RefineRequirement
@@ -651,6 +685,7 @@ export default function DashboardPage() {
               <AnalysisResults />
             </div>
           </div>
+            )}
             </div>
         ) : activeTab === "history" ? (
           <AnalysisHistory

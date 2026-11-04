@@ -3,6 +3,8 @@ import { supabaseServer } from "@/lib/supabase-server";
 import { analyzeRequirementComplexity, createTimeoutFallback, type ComplexityAnalysis } from "@/lib/complexity-analyzer";
 import { requireUser } from "@/lib/require-user";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { pruneUserHistory } from "@/lib/history-retention";
+import { buildGraphBreakdown, cleanFormulaText, formulaLine } from "@/lib/graph-breakdown";
 
 export async function POST(request: NextRequest) {
   try {
@@ -43,6 +45,19 @@ export async function POST(request: NextRequest) {
     if (questionsMetadata && !Array.isArray(questionsMetadata)) {
       console.warn("⚠️ [2/5] questionsMetadata provided but invalid format, proceeding without it");
       questionsMetadata = undefined;
+    }
+    if (Array.isArray(questionsMetadata)) {
+      // Keep only well-formed entries; at most 50 questions
+      questionsMetadata = questionsMetadata
+        .filter((q: any) => q && typeof q.question === "string" && typeof q.isAnswered === "boolean")
+        .slice(0, 50)
+        .map((q: any, i: number) => ({
+          questionNumber: Number.isFinite(q.questionNumber) ? q.questionNumber : i + 1,
+          question: String(q.question).slice(0, 500),
+          answer: String(q.answer ?? "").slice(0, 2000),
+          isAnswered: q.isAnswered,
+        }));
+      if (questionsMetadata.length === 0) questionsMetadata = undefined;
     }
 
     // Sanitize text: remove null characters and other problematic Unicode
@@ -181,26 +196,16 @@ export async function POST(request: NextRequest) {
     let correctedAnalysis = String(analysis.analysis || "Analysis complete");
 
     // Generate the correct formula string
-    const correctFormula = `N=${n}, E=${e}, P=${p} → M = ${e} - ${n} + 2(${p}) = ${calculatedComplexityScore}`;
+    const correctFormula = formulaLine(n, e, p);
 
-    // Replace any formula pattern with the correct one
-    correctedReasoning = correctedReasoning.replace(
-      /N=\d+,\s*E=\d+,\s*P=\d+\s*→\s*M\s*=\s*[\d\s\-\+\(\)]+=/g,
-      `${correctFormula.slice(0, -` ${calculatedComplexityScore}`.length)}=`
-    );
+    // Replace any formula (with or without its "N=.., E=.., P=.. →" prefix) by one correct line,
+    // so the counts are never written twice
+    const formulaPattern = /(?:N=\d+,\s*E=\d+,\s*P=\d+\s*→\s*)*M\s*=\s*\d+\s*-\s*\d+\s*\+\s*2\(\d+\)\s*=\s*-?\d+/g;
+    correctedReasoning = cleanFormulaText(correctedReasoning.replace(formulaPattern, correctFormula));
+    correctedAnalysis = cleanFormulaText(correctedAnalysis.replace(formulaPattern, correctFormula));
 
-    // Also try simpler pattern if the above doesn't match
-    if (!correctedReasoning.includes(correctFormula)) {
-      correctedReasoning = correctedReasoning.replace(
-        /M\s*=\s*\d+\s*-\s*\d+\s*\+\s*2\(\d+\)\s*=\s*\d+/g,
-        correctFormula
-      );
-    }
-
-    correctedAnalysis = correctedAnalysis.replace(
-      /M\s*=\s*\d+\s*-\s*\d+\s*\+\s*2\(\d+\)\s*=\s*\d+/g,
-      correctFormula
-    );
+    // Node / edge / path breakdown from the listed graph (Start/End, actions, decisions, loop-backs)
+    const breakdown = buildGraphBreakdown(analysis.nodes, analysis.edges, analysis.paths);
 
     const sanitizedAnalysis = {
       nodesCount: n,
@@ -213,14 +218,15 @@ export async function POST(request: NextRequest) {
       nodes: Array.isArray(analysis.nodes) ? analysis.nodes : [],
       edges: Array.isArray(analysis.edges) ? analysis.edges : [],
       paths: Array.isArray(analysis.paths) ? analysis.paths : [],
-      decisionPoints: Array.isArray(analysis.decisionPoints)
-        ? analysis.decisionPoints
-        : [],
+      // Decision points are the steps where the graph branches (more than one way out)
+      decisionPoints: breakdown.nodes.decisionList,
+      breakdown,
       alternativePaths: p,
       analysis: correctedAnalysis,
       reasoning: correctedReasoning,
       confidenceScore: analysis.confidenceScore || 75,
       confidenceReason: analysis.confidenceReason || "Analysis complete",
+      ambiguities: Array.isArray(analysis.ambiguities) ? analysis.ambiguities : [],
       analyzedScenarios: analysis.analyzedScenarios || undefined,
     };
 
@@ -268,11 +274,14 @@ export async function POST(request: NextRequest) {
             edges: sanitizedAnalysis.edges,
             paths: sanitizedAnalysis.paths,
             decisionPoints: sanitizedAnalysis.decisionPoints,
+            breakdown: sanitizedAnalysis.breakdown,
             alternativePaths: sanitizedAnalysis.alternativePaths,
             analysis: sanitizedAnalysis.analysis,
             reasoning: sanitizedAnalysis.reasoning,
             confidenceScore: sanitizedAnalysis.confidenceScore,
             confidenceReason: sanitizedAnalysis.confidenceReason,
+            ambiguities: sanitizedAnalysis.ambiguities,
+            analysisMode: (sanitizedAnalysis.analyzedScenarios as any)?.analysisPath || "direct",
           },
         })
         .select()
@@ -299,6 +308,9 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       );
     }
+
+    // Keep only the latest analyses in history
+    await pruneUserHistory(userData.id);
 
     // ✅ SUCCESS: Return response
     console.log("✅ ✅ ✅ ALL STEPS COMPLETED SUCCESSFULLY ✅ ✅ ✅");
@@ -349,6 +361,8 @@ export async function POST(request: NextRequest) {
         edges: sanitizedAnalysis.edges,
         pathsList: sanitizedAnalysis.paths,
         decisionPoints: sanitizedAnalysis.decisionPoints,
+        breakdown: sanitizedAnalysis.breakdown,
+        ambiguities: sanitizedAnalysis.ambiguities,
         analysis: sanitizedAnalysis.analysis,
         reasoning: sanitizedAnalysis.reasoning,
         confidenceScore: sanitizedAnalysis.confidenceScore,

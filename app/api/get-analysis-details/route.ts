@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { requireUser } from "@/lib/require-user";
+import { buildGraphBreakdown, cleanFormulaText } from "@/lib/graph-breakdown";
+import { ambiguityNotes } from "@/lib/qa-status";
 
 export async function GET(request: NextRequest) {
   try {
@@ -50,6 +52,23 @@ export async function GET(request: NextRequest) {
     const result = requirement.complexity_results[0];
     const analysisData = result.analysis_data || {};
 
+    const storedNodes = Array.isArray(analysisData.nodes) ? analysisData.nodes : [];
+    const storedEdges = Array.isArray(analysisData.edges) ? analysisData.edges : [];
+    const storedPaths: unknown[] = Array.isArray(analysisData.paths) ? analysisData.paths : [];
+    // Worked out from the stored graph, so older analyses get the breakdown too
+    const breakdown = buildGraphBreakdown(storedNodes, storedEdges, storedPaths);
+    // Conflicting Q&A answers are shown first under "Checks"
+    breakdown.notes = [...ambiguityNotes(analysisData.ambiguities), ...breakdown.notes];
+    // Show each route once; older records can list the same route twice or a heading as a "path"
+    const seenRoutes = new Set<string>();
+    const displayPaths = storedPaths.filter((path) => {
+      if (!Array.isArray(path) || path.length < 2) return false;
+      const key = path.map((s) => String(s).replace(/\s+/g, " ").trim()).join("|");
+      if (seenRoutes.has(key)) return false;
+      seenRoutes.add(key);
+      return true;
+    });
+
     const analysisDetails = {
       requirement: {
         id: requirement.id,
@@ -67,17 +86,28 @@ export async function GET(request: NextRequest) {
       },
       metrics: {
         calculation: `M = E - N + 2P = ${result.edges_count} - ${result.nodes_count} + 2(${analysisData.alternativePaths || 1}) = ${result.complexity_score}`,
-        nodes: Array.isArray(analysisData.nodes) ? analysisData.nodes : [],
-        edges: Array.isArray(analysisData.edges) ? analysisData.edges : [],
-        paths: Array.isArray(analysisData.paths) ? analysisData.paths : [],
-        decisionPoints: Array.isArray(analysisData.decisionPoints) ? analysisData.decisionPoints : [],
+        nodes: storedNodes,
+        edges: storedEdges,
+        paths: displayPaths,
+        // Steps where the graph branches (more than one way out)
+        decisionPoints: breakdown.nodes.decisionList,
+        breakdown,
       },
       reasoning: {
-        analysis: analysisData.analysis || "",
-        detailed: analysisData.reasoning || "",
+        analysis: cleanFormulaText(analysisData.analysis || ""),
+        detailed: cleanFormulaText(analysisData.reasoning || ""),
         confidenceScore: analysisData.confidenceScore || 0,
         confidenceReason: analysisData.confidenceReason || "",
       },
+      // Only present for an analysis that combines several documents
+      ...(Array.isArray(analysisData.mergedFrom)
+        ? {
+            merge: {
+              documents: analysisData.mergedFrom,
+              sharedSteps: Array.isArray(analysisData.sharedSteps) ? analysisData.sharedSteps : [],
+            },
+          }
+        : {}),
       generatedAt: new Date().toISOString(),
     };
 

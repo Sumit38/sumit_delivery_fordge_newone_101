@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/require-user";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { supabaseServer } from "@/lib/supabase-server";
 import { calculateEstimation } from "@/lib/estimation-calculator";
+import { pruneUserHistory } from "@/lib/history-retention";
 
 export async function POST(request: NextRequest) {
   try {
@@ -86,6 +87,7 @@ export async function POST(request: NextRequest) {
     }
 
     console.log("✅ [4/4] Estimation saved successfully");
+    await pruneUserHistory(userId);
     console.log("✅ ✅ ✅ ALL STEPS COMPLETED ✅ ✅ ✅");
 
     return NextResponse.json({

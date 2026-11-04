@@ -6,6 +6,11 @@ export const REQUIREMENT_FILE_ACCEPT =
 export const REQUIREMENT_FILE_LABEL = ".txt, .pdf, .docx (max 4 MB)";
 
 const MAX_BYTES = 4 * 1024 * 1024;
+export const MAX_UPLOAD_MB = 4;
+
+// The complexity analysis reads at most this many characters of a requirement
+// (about 12,000 words / 25-30 pages). Keep in sync with lib/complexity-analyzer.ts.
+export const MAX_ANALYSIS_CHARS = 80_000;
 
 async function extractOnServer(endpoint: string, file: File): Promise<string> {
   const response = await authFetch(endpoint, {

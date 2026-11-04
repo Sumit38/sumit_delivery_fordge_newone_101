@@ -2,6 +2,8 @@
 // downloads a self-contained HTML report that explains how the flow and the
 // complexity score were derived. Nothing here changes N, E, P or M.
 
+import { buildGraphBreakdown, cleanFormulaText, type GraphBreakdown } from "./graph-breakdown";
+
 export interface FlowEdge {
   from: string;
   to: string;
@@ -23,12 +25,18 @@ export interface AnalysisDetails {
     edges: FlowEdge[];
     paths: string[][];
     decisionPoints?: string[];
+    breakdown?: GraphBreakdown;
   };
   reasoning?: {
     analysis?: string;
     detailed?: string;
     confidenceScore?: number;
     confidenceReason?: string;
+  };
+  // Set when the analysis combines several requirement documents
+  merge?: {
+    documents: Array<{ title: string; n: number; e: number; p: number; m: number }>;
+    sharedSteps: string[];
   };
 }
 
@@ -106,12 +114,19 @@ export function buildFlowMermaid(nodes: string[], inputEdges: FlowEdge[]): strin
   return lines.join("\n");
 }
 
+export interface PathTreeNode {
+  id: string;
+  label: string;
+  children: Map<string, PathTreeNode>;
+  pathNos: number[];
+}
+
 // Path tree: the Start-to-End paths merged on their shared prefixes, so each
 // fork shows where one path splits into several. Leaves are labelled P1..Pn.
-export function buildPathTreeMermaid(paths: string[][]): string | null {
+export function buildPathTree(paths: string[][]): { root: PathTreeNode; size: number } | null {
   if (!paths.length) return null;
 
-  interface TrieNode { id: string; label: string; children: Map<string, TrieNode>; pathNos: number[] }
+  type TrieNode = PathTreeNode;
   let counter = 0;
   const root: TrieNode = { id: "T0", label: paths[0][0] || "Start", children: new Map(), pathNos: [] };
 
@@ -134,10 +149,28 @@ export function buildPathTreeMermaid(paths: string[][]): string | null {
     current.pathNos.push(idx + 1);
   });
 
-  if (counter + 1 > MAX_TREE_NODES) return null;
+  return { root, size: counter + 1 };
+}
 
-  const lines = ["flowchart LR"];
-  const walk = (node: TrieNode) => {
+// True when the path tree has too many steps to draw inside the report
+export function isPathTreeTooLarge(paths: string[][]): boolean {
+  const tree = buildPathTree(paths);
+  return !!tree && tree.size > MAX_TREE_NODES;
+}
+
+// Mermaid source for the path tree. The report draws it left to right and stops
+// at MAX_TREE_NODES; the full-page view draws it top to bottom with no limit.
+export function buildPathTreeMermaid(
+  paths: string[][],
+  options: { direction?: "LR" | "TD"; maxNodes?: number } = {}
+): string | null {
+  const tree = buildPathTree(paths);
+  if (!tree) return null;
+  if (tree.size > (options.maxNodes ?? MAX_TREE_NODES)) return null;
+  const { root } = tree;
+
+  const lines = [`flowchart ${options.direction || "LR"}`];
+  const walk = (node: PathTreeNode) => {
     const suffix = node.pathNos.length ? ` ✓ ${node.pathNos.map((n) => `P${n}`).join(", ")}` : "";
     const label = mermaidText(node.label) + suffix;
     lines.push(node.children.size > 1 ? `  ${node.id}{"${label}"}` : `  ${node.id}["${label}"]`);
@@ -150,17 +183,79 @@ export function buildPathTreeMermaid(paths: string[][]): string | null {
   return lines.join("\n");
 }
 
-async function renderSvg(code: string, id: string): Promise<string> {
+export async function renderSvg(code: string, id: string): Promise<string> {
   const mermaid = (await import("mermaid")).default;
-  mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "strict" });
+  // Raised size limits so large graphs draw instead of failing on Mermaid's defaults
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: "default",
+    securityLevel: "strict",
+    maxTextSize: 2_000_000,
+    maxEdges: 20_000,
+  });
   const { svg } = await mermaid.render(id, code);
   return svg;
 }
 
+function mergeSectionHtml(merge: NonNullable<AnalysisDetails["merge"]>): string {
+  const rows = merge.documents
+    .map((doc, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(doc.title)}</td><td>${doc.n}</td><td>${doc.e}</td><td>${doc.p}</td><td>${doc.m}</td></tr>`)
+    .join("");
+  const shared = merge.sharedSteps.length
+    ? `Steps found in more than one document (counted once): ${merge.sharedSteps.map(escapeHtml).join(", ")}.`
+    : "No step names matched across the documents, so only Start and End are shared.";
+  return `
+  <h2>Combined from ${merge.documents.length} documents</h2>
+  <div class="card">
+    <p class="muted">Each document was analysed on its own, then the graphs were joined: Start and End are shared, steps with the same name are counted once, and repeated edges and paths are counted once. ${shared}</p>
+    <table><tr><th>#</th><th>Document</th><th>N</th><th>E</th><th>P</th><th>M (own)</th></tr>${rows}</table>
+  </div>`;
+}
+
+// Link to the full-page path tree view in the app (absolute, so it works from a downloaded file)
+export function pathTreePageUrl(requirementId: string, origin?: string): string | null {
+  const base = origin || (typeof window !== "undefined" ? window.location.origin : "");
+  if (!base || !requirementId) return null;
+  return `${base}/path-tree?id=${encodeURIComponent(requirementId)}`;
+}
+
+// "How N, E and P are made up" section: node types, edge types, path checks.
+export function breakdownSectionHtml(bd: GraphBreakdown, counts: { n: number; e: number; p: number }): string {
+  const list = (items: string[]) => (items.length ? items.map(escapeHtml).join(", ") : "none");
+  const mismatch: string[] = [];
+  if (bd.nodes.total !== counts.n) mismatch.push(`the graph lists ${bd.nodes.total} nodes but N = ${counts.n}`);
+  if (bd.edges.total !== counts.e) mismatch.push(`the graph lists ${bd.edges.total} edges but E = ${counts.e}`);
+  const notes = [
+    ...(mismatch.length ? [`Stored counts differ from the drawn graph: ${mismatch.join("; ")}. Re-run the analysis to align them.`] : []),
+    ...bd.notes,
+  ];
+  return `
+  <h2>How N, E and P are made up</h2>
+  <div class="card">
+    <table>
+      <tr><th>Part</th><th>Count</th><th>What it is</th></tr>
+      <tr><td><b>Nodes (N)</b></td><td><b>${bd.nodes.total}</b></td><td>${bd.nodes.startEnd} Start/End + ${bd.nodes.actions} action steps + ${bd.nodes.decisions} decision points</td></tr>
+      <tr><td>&nbsp;&nbsp;Start / End</td><td>${bd.nodes.startEnd}</td><td>Where the flow begins and finishes</td></tr>
+      <tr><td>&nbsp;&nbsp;Action steps</td><td>${bd.nodes.actions}</td><td>Steps with one way out (do something, then continue)</td></tr>
+      <tr><td>&nbsp;&nbsp;Decision points</td><td>${bd.nodes.decisions}</td><td>Steps with more than one way out: ${list(bd.nodes.decisionList)}</td></tr>
+      <tr><td><b>Edges (E)</b></td><td><b>${bd.edges.total}</b></td><td>${bd.edges.forward} forward transitions + ${bd.edges.loopBack} loop-backs; ${bd.edges.fromDecisions} of them are branches leaving a decision point</td></tr>
+      <tr><td>&nbsp;&nbsp;Loop-backs</td><td>${bd.edges.loopBack}</td><td>${bd.edges.loopBackList.length ? bd.edges.loopBackList.map((l) => `${escapeHtml(l.from)} &rarr; ${escapeHtml(l.to)}${l.condition ? ` (${escapeHtml(l.condition)})` : ""}`).join("; ") : "none"}</td></tr>
+      <tr><td><b>Paths (P)</b></td><td><b>${counts.p}</b></td><td>Distinct Start-to-End paths that together take every branch at least once${bd.paths.uncoveredBranches ? ` (${bd.paths.uncoveredBranches} branch(es) not yet taken)` : ""}${bd.paths.graphRoutes !== null && bd.paths.graphRoutes > counts.p ? `. For reference, all combinations of outcomes give ${bd.paths.graphRoutes} routes; P covers each outcome, not each combination.` : ""}</td></tr>
+    </table>
+    ${
+      notes.length
+        ? `<div style="margin-top:12px;background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;padding:10px"><b>Checks</b><ul style="margin:6px 0 0">${notes.map((t) => `<li>${escapeHtml(t)}</li>`).join("")}</ul></div>`
+        : `<p class="muted" style="margin-top:10px">Checks passed: every listed path runs Start to End along the drawn edges, with no repeats.</p>`
+    }
+  </div>`;
+}
+
 function buildReportHtml(d: AnalysisDetails, flowCode: string, flowSvg: string, treeCode: string | null, treeSvg: string | null): string {
+  const treeLink = pathTreePageUrl(d.requirement.id);
   const { nodes, edges, paths } = d.metrics;
   const { nodesCount: n, edgesCount: e, paths: p, complexityScore: m } = d.analysis;
   const branches = findBranchNodes(edges);
+  const bd = d.metrics.breakdown || buildGraphBreakdown(nodes, edges, paths);
 
   const edgeRows = edges
     .map((ed, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(ed.from)}</td><td>${escapeHtml(ed.to)}</td><td>${escapeHtml(ed.condition || "-")}</td></tr>`)
@@ -194,6 +289,8 @@ function buildReportHtml(d: AnalysisDetails, flowCode: string, flowSvg: string, 
   .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
   pre { background: #0f172a; color: #e2e8f0; padding: 14px; border-radius: 8px; overflow-x: auto; font-size: 12px; }
   svg { max-width: 100%; height: auto; }
+  .big-tree { background: #fffbeb; border-color: #fcd34d; }
+  .btn { display: inline-block; background: #1f3a5f; color: #fff; padding: 8px 14px; border-radius: 6px; text-decoration: none; font-weight: bold; }
 </style>
 </head>
 <body>
@@ -209,6 +306,8 @@ function buildReportHtml(d: AnalysisDetails, flowCode: string, flowSvg: string, 
     <div class="metric">Test Scenarios (2P)<b>${2 * p}</b></div>
   </div>
   <div class="formula">M = E &minus; N + 2P = ${e} &minus; ${n} + 2(${p}) = <b>${m}</b></div>
+${breakdownSectionHtml(bd, { n, e, p })}
+${d.merge ? mergeSectionHtml(d.merge) : ""}
 
   <h2>1. How the flow was generated</h2>
   <div class="card">
@@ -233,8 +332,17 @@ function buildReportHtml(d: AnalysisDetails, flowCode: string, flowSvg: string, 
     treeSvg
       ? `<h2>3. Path tree</h2>
   <p class="muted">Paths are merged where they share the same steps, so each fork shows where the flow splits. Labels P1, P2 &hellip; mark where each path ends.</p>
-  <div class="card">${treeSvg}</div>`
-      : `<h2>3. Path tree</h2><p class="muted">The path tree is too large to draw clearly; see the path table below.</p>`
+  <div class="card">${treeSvg}</div>${treeLink ? `<p class="muted"><a href="${escapeHtml(treeLink)}" target="_blank" rel="noopener">Open the path tree on its own page (top-to-bottom view) &#8599;</a></p>` : ""}`
+      : `<h2>3. Path tree</h2>
+  <div class="card big-tree">
+    <p><b>This path tree is too large to show here.</b></p>
+    ${
+      treeLink
+        ? `<p><a class="btn" href="${escapeHtml(treeLink)}" target="_blank" rel="noopener">Open the full path tree (top-to-bottom view) &#8599;</a></p>
+    <p class="muted">Opens in DeliveryForge; sign in if asked. The path table below lists every path as well.</p>`
+        : `<p class="muted">See the path table below.</p>`
+    }
+  </div>`
   }
 
   <h2>4. Paths (Start to End)</h2>
@@ -245,7 +353,7 @@ function buildReportHtml(d: AnalysisDetails, flowCode: string, flowSvg: string, 
 
   ${
     d.reasoning?.detailed || d.reasoning?.analysis
-      ? `<h2>6. Analysis reasoning</h2><div class="card">${escapeHtml(d.reasoning.detailed || d.reasoning.analysis || "")}${
+      ? `<h2>6. Analysis reasoning</h2><div class="card">${escapeHtml(cleanFormulaText(d.reasoning.detailed || d.reasoning.analysis || ""))}${
           d.reasoning.confidenceScore ? `<p class="muted">Confidence: ${d.reasoning.confidenceScore}%</p>` : ""
         }</div>`
       : ""

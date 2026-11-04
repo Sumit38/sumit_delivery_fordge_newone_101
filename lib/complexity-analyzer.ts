@@ -1,8 +1,66 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { buildGraphBreakdown, completeBranchCoverage } from "./graph-breakdown";
+import { AMBIGUOUS_CONFIDENCE_CAP, analysisMode, countAnswersInText, parseAmbiguities } from "./qa-status";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
+
+// The complexity analysis (graph design) runs on Opus for accuracy on complex
+// requirements; every other feature stays on Haiku. Both can be changed with
+// environment variables without a code change.
+export const ANALYSIS_MODEL = process.env.ANALYSIS_MODEL || "claude-opus-5-5";
+const ANALYSIS_EFFORT = (process.env.ANALYSIS_EFFORT || "low") as "low" | "medium" | "high";
+// Fast mode runs Opus up to 2.5x faster (measured: 16 s instead of 40 s for the same
+// analysis) at 2x the Opus token price. Without it Opus often passes the 60 s limit.
+const ANALYSIS_FAST_MODE = (process.env.ANALYSIS_FAST_MODE ?? "true") !== "false";
+const BACKUP_MODEL = "claude-haiku-4-5-20251001";
+// Leaves room inside Vercel Hobby's 60 s limit for parsing and saving
+const ANALYSIS_TIMEOUT_MS = 45_000;
+
+type AnalysisMessage = { role: "user"; content: string };
+
+// Sends the analysis prompt and returns the reply text blocks.
+// - Opus 5.5: thinking is always on; low effort keeps it fast. Sampling settings
+//   such as temperature are not accepted. If Opus declines a request, the API's
+//   built-in fallback answers with another model instead.
+// - If the Opus call errors (not a timeout), the same prompt goes to Haiku
+//   with the settings used before, so an analysis still comes back.
+async function createAnalysisMessage(messages: AnalysisMessage[]) {
+  const started = Date.now();
+  if (ANALYSIS_MODEL.startsWith("claude-opus") || ANALYSIS_MODEL.startsWith("claude-sonnet-5")) {
+    try {
+      const fast = ANALYSIS_FAST_MODE && ANALYSIS_MODEL.startsWith("claude-opus");
+      const reply = await anthropic.beta.messages.create(
+        {
+          model: ANALYSIS_MODEL,
+          max_tokens: 16000,
+          output_config: { effort: ANALYSIS_EFFORT },
+          betas: fast ? ["server-side-fallback-2026-07-01", "fast-mode-2026-02-01"] : ["server-side-fallback-2026-07-01"],
+          fallbacks: "default",
+          ...(fast ? { speed: "fast" as const } : {}),
+          messages,
+        },
+        { timeout: ANALYSIS_TIMEOUT_MS, maxRetries: 0 }
+      );
+      console.log(`⏱️ ${reply.model} answered in ${((Date.now() - started) / 1000).toFixed(1)}s (stop: ${reply.stop_reason})`);
+      if (reply.stop_reason === "refusal") throw new Error("Analysis model declined the request");
+      return { model: reply.model, content: reply.content };
+    } catch (err: any) {
+      const timedOut = err?.name === "APIConnectionTimeoutError" || /timed? ?out/i.test(String(err?.message));
+      if (timedOut) throw new Error(`Analysis timeout - ${ANALYSIS_MODEL} took longer than ${ANALYSIS_TIMEOUT_MS / 1000}s`);
+      console.warn(`⚠️ ${ANALYSIS_MODEL} failed (${err?.message || err}); using ${BACKUP_MODEL}`);
+    }
+  }
+
+  const reply = await anthropic.messages.create({
+    model: ANALYSIS_MODEL.startsWith("claude-haiku") ? ANALYSIS_MODEL : BACKUP_MODEL,
+    max_tokens: 12000,
+    temperature: 0,
+    messages,
+  });
+  return { model: reply.model, content: reply.content };
+}
 
 export interface QuestionMetadata {
   questionNumber: number;
@@ -29,6 +87,7 @@ export interface AnalyzedScenarios {
   requirementDetail?: string;
   note?: string;
   warning?: string;
+  ambiguous?: boolean;
 }
 
 export interface ComplexityAnalysis {
@@ -46,6 +105,8 @@ export interface ComplexityAnalysis {
   reasoning?: string;
   confidenceScore?: number;
   confidenceReason?: string;
+  // Answer combinations that cannot all be true (empty when the answers agree)
+  ambiguities?: string[];
   analyzedScenarios?: AnalyzedScenarios;
 }
 
@@ -111,55 +172,45 @@ export async function analyzeRequirementComplexity(
     const textSizeKB = Buffer.byteLength(requirementText, 'utf8') / 1024;
     console.log(`📏 Requirement size: ${textSizeKB.toFixed(1)}KB`);
 
-    if (textSizeKB > 80) {
-      console.warn(`⚠️ Large requirement detected (${textSizeKB.toFixed(1)}KB). Truncating for analysis...`);
-      // For very large requirements, truncate to first 80KB to avoid protocol errors
-      const maxChars = Math.floor(80 * 1024 / 2); // Approximate character count
+    // Analyse at most 80,000 characters (the limit shown on the Requirement Analysis tab;
+    // MAX_ANALYSIS_CHARS in lib/read-requirement-file.ts). Previously anything over 80 KB
+    // was cut to ~41,000 characters, so a bigger document got less text analysed.
+    const maxChars = 80_000;
+    if (requirementText.length > maxChars) {
+      console.warn(`⚠️ Large requirement (${textSizeKB.toFixed(1)}KB, ${requirementText.length} chars). Analysing the first ${maxChars} characters.`);
       requirementText = requirementText.substring(0, maxChars) + "\n[... requirement truncated due to size ...]";
-      console.warn(`✂️ Truncated to ~80KB. Use fallback if analysis still fails.`);
     }
 
-    // Calculate question coverage
-    const totalQuestions = 15;
-
-    // ✅ CRITICAL FIX: Detect Q&A from requirement text if questionsMetadata is empty
-    // This handles cases where Q&A is embedded in the requirement text
+    // Question coverage. The Refine screen sends which questions the user answered and which
+    // were skipped (questionsMetadata); otherwise the Q&A is read from the latest refine round
+    // in the text ("A: Selected: ..." = the user's answer, anything else = the AI's suggestion).
+    let totalQuestions = 15;
     const answeredQuestions = questionsMetadata?.filter(q => q.isAnswered) || [];
     let answeredCount = answeredQuestions.length;
 
-    // If no metadata but text contains Q&A markers, detect from text
-    if (answeredCount === 0 && requirementText.includes("Q:") && requirementText.includes("A:")) {
-      // CRITICAL FIX: Count only SELECTED answers (user answered), not all Q&A pairs
-      // Pattern: "A: Selected: ..." indicates user selection
-      // Avoid counting system-generated or partial answers
-      const selectedAnswers = (requirementText.match(/A:\s*Selected:/gm) || []).length;
-      const totalQPairs = (requirementText.match(/^Q:/gm) || []).length;
-
-      // Use selected answers count if found, otherwise fall back to total Q pairs
-      answeredCount = selectedAnswers > 0 ? selectedAnswers : Math.min(totalQPairs, totalQuestions);
-      answeredCount = Math.min(answeredCount, totalQuestions);
-
-      console.log(`⚠️ DETECTION: Found ${selectedAnswers} SELECTED answers and ${totalQPairs} total Q pairs in requirement text`);
-      if (selectedAnswers > 0) {
-        console.log(`   → Using SELECTED answers count: ${selectedAnswers}`);
-      } else {
-        console.log(`   → No "Selected:" pattern found, using total Q pairs: ${totalQPairs}`);
+    if (questionsMetadata && questionsMetadata.length > 0) {
+      totalQuestions = questionsMetadata.length;
+      console.log(`📋 Q&A status from Refine: ${answeredCount} answered, ${totalQuestions - answeredCount} skipped of ${totalQuestions}`);
+    } else {
+      const fromText = countAnswersInText(requirementText);
+      if (fromText.total > 0) {
+        totalQuestions = fromText.total;
+        answeredCount = fromText.answered;
+        console.log(`📋 Q&A read from text (latest round): ${answeredCount} answered of ${totalQuestions}`);
       }
     }
 
-    // HYBRID APPROACH: Infer unanswered questions from requirement text
+    // guided = every question answered; hybrid = some answered; direct = none
     let inferredQuestions: QuestionMetadata[] = [];
-    let analysispath: "guided" | "hybrid" | "direct" = "direct";
+    let analysispath: "guided" | "hybrid" | "direct" = analysisMode(answeredCount, totalQuestions);
 
-    if (answeredCount > 0 && answeredCount < 8) {
+    if (analysispath === "hybrid") {
       // HYBRID PATH: User answered some but not all
-      analysispath = "hybrid";
       inferredQuestions = inferQuestionsFromRequirement(requirementText, answeredQuestions);
       console.log(`\n🧠 HYBRID PATH: ${answeredCount} answered + ${inferredQuestions.length} inferred`);
-    } else if (answeredCount >= 8) {
-      // GUIDED PATH: User answered most questions
-      analysispath = "guided";
-      console.log(`\n📝 GUIDED PATH: ${answeredCount} questions answered`);
+    } else if (analysispath === "guided") {
+      // GUIDED PATH: User answered every question
+      console.log(`\n📝 GUIDED PATH: all ${answeredCount} questions answered`);
     } else {
       // DIRECT PATH: No questions answered
       analysispath = "direct";
@@ -168,7 +219,8 @@ export async function analyzeRequirementComplexity(
 
     // Combine answered + inferred for analysis
     const allAnalyzedQuestions = [...answeredQuestions, ...inferredQuestions];
-    const totalAnalyzed = allAnalyzedQuestions.length;
+    // answeredCount also covers answers read from the text (no metadata), so count from it
+    const totalAnalyzed = Math.min(answeredCount + inferredQuestions.length, totalQuestions);
     const coveragePercentage = Math.round((totalAnalyzed / totalQuestions) * 100);
 
     // ✅ Log what will be passed to fallback for debugging
@@ -186,11 +238,7 @@ export async function analyzeRequirementComplexity(
       });
     }
 
-    const response = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 12000,
-      temperature: 0,
-      messages: [
+    const response = await createAnalysisMessage([
         {
           role: "user",
           content: `Use McCabe's formula M = E - N + 2P to analyze this requirement. Be thorough in the analysis, but write the answer in the compact format below.
@@ -198,7 +246,12 @@ export async function analyzeRequirementComplexity(
 REQUIREMENT:
 ${requirementText}
 
-${allAnalyzedQuestions.length > 0 ? `
+${questionsMetadata && questionsMetadata.length > 0 ? `
+ANSWER STATUS (from the Refine screen):
+- Answered by the user: ${questionsMetadata.filter(q => q.isAnswered).map(q => `Q${q.questionNumber}`).join(", ") || "none"}
+- Skipped (the answer shown in the requirement is the AI's suggestion, not confirmed by the user): ${questionsMetadata.filter(q => !q.isAnswered).map(q => `Q${q.questionNumber}`).join(", ") || "none"}
+Questions are numbered in the order they appear under CLARIFICATIONS & ANSWERS. Use the suggested answers as the most likely answers, and do not report a suggestion as an ambiguity just because it was not confirmed.
+` : allAnalyzedQuestions.length > 0 ? `
 ANALYZED SCENARIOS (Answered + Intelligently Inferred):
 ${allAnalyzedQuestions
   .map(q => {
@@ -247,6 +300,7 @@ OUTPUT FORMAT (strict, compact):
 - Give every node a short ID: START, N1, N2, N3 ... and END. Use the IDs (not the labels) in EDGES and PATHS.
 - Node labels: at most 6 words. Edge conditions: at most 4 words.
 - A path is a distinct route from START to END. A path never visits the same node twice; show a loop (such as a retry) as an edge back, and the retry branch as its own path.
+- Every loop needs an exit that reaches END (for example "retries exhausted" or "rejected, closed"). Every decision outcome must be on at least one listed path. List paths to cover each outcome once; do not list every combination of outcomes.
 - In CALCULATION, N, E and P must equal the number of lines you listed under NODES, EDGES and PATHS. Do not show working.
 
 REASONING:
@@ -270,12 +324,16 @@ CALCULATION:
 N = number
 E = number
 P = number
-M = E - N + 2P = number`,
-        },
-      ],
-    });
+M = E - N + 2P = number
 
-    console.log("✅ Response received from Claude");
+AMBIGUITIES:
+- one line per conflict, or the single word: none
+
+AMBIGUITY CHECK: Before drawing the graph, check the answers under CLARIFICATIONS & ANSWERS against each other and against the requirement. An ambiguity is a combination of answers that cannot all be true or that leaves a decision undecided (for example "rollback within 30 days only" and "full version control with rollback"). If the text contains earlier refine rounds after "Generated from raw requirement", the answers at the top are the latest; check only those. Under AMBIGUITIES list each conflict in one line naming both answers, or write "none".`,
+        },
+    ]);
+
+    console.log(`✅ Response received from Claude (${response.model})`);
 
     // Extract text from response
     let fullText = "";
@@ -289,6 +347,11 @@ M = E - N + 2P = number`,
 
     // Compact ID format (START/N1/.../END) is the primary format; the older
     // free-text parser below only runs if Claude did not follow it.
+    const ambiguities = parseAmbiguities(fullText);
+    if (ambiguities.length) {
+      console.log(`⚠️ ${ambiguities.length} answer conflict(s) found:`, ambiguities);
+    }
+
     const compact = parseCompactGraph(fullText);
     if (compact) {
       console.log(`✅ Compact graph parsed: ${compact.nodes.length} nodes, ${compact.edges.length} edges, ${compact.paths.length} paths`);
@@ -362,7 +425,14 @@ M = E - N + 2P = number`,
     };
 
     let n: number | null, e: number | null, p: number | null, m: number | null;
+    let addedRoutes = 0;
     if (compact) {
+      // The listed paths must take every branch (each decision outcome) at least once.
+      // If Claude left a branch out, add one Start-to-End path through it, so no outcome goes untested.
+      addedRoutes = completeBranchCoverage(compact.nodes, compact.edges, compact.paths);
+      if (addedRoutes > 0) {
+        console.log(`ℹ️ Added ${addedRoutes} path(s) so every branch is covered by at least one Start-to-End path`);
+      }
       // Count from the graph Claude listed (the same graph that is stored and drawn).
       // Claude's own arithmetic is often off by a few (e.g. leaving out Start/End).
       n = compact.nodes.length;
@@ -479,27 +549,30 @@ M = E - N + 2P = number`,
     if (reasoningMatch) {
       reasoning = reasoningMatch[1].trim();
     }
+    if (addedRoutes > 0) {
+      reasoning = `${reasoning ? `${reasoning} ` : ""}${addedRoutes} path(s) were added so that every branch in the graph is taken by at least one Start-to-End path.`;
+    }
 
     // THREE-PATH CONFIDENCE SYSTEM (NO BIAS, INTELLIGENT)
     let confidenceData: { score: number; reason: string; analysispath?: string };
 
     if (analysispath === "guided") {
-      // PATH 1: GUIDED (User answered 8-15 questions)
-      // Confidence = (Answered / 15) × 100 (Direct Claude analysis - no fallback penalty)
+      // PATH 1: GUIDED (User answered every question)
+      // Confidence = (Answered / Total) × 100 (Direct Claude analysis - no fallback penalty)
       const guidedConfidence = Math.round((answeredCount / totalQuestions) * 100);
       confidenceData = {
         score: guidedConfidence,
         reason: `Complete Analysis - Full Q&A Coverage (${guidedConfidence}% confidence)
-   Questions Answered: ${guidedConfidence === 100 ? "All 15 questions" : `${answeredCount} of 15 questions`}
+   Questions Answered: ${guidedConfidence === 100 ? `All ${totalQuestions} questions` : `${answeredCount} of ${totalQuestions} questions`}
    Analysis Method: AI-driven analysis with comprehensive Q&A validation
    Status: ✅ Highly Reliable - Dual-validated through multiple verification methods`,
         analysispath: "guided"
       };
-      console.log(`\n📊 PATH 1 (GUIDED): Pure facts from ${answeredCount}/15 questions`);
+      console.log(`\n📊 PATH 1 (GUIDED): Pure facts from ${answeredCount}/${totalQuestions} questions`);
 
     } else if (analysispath === "hybrid") {
-      // PATH 2: HYBRID (User answered 2-7 questions + intelligent inference)
-      // Confidence = (Answered + Inferred) / 15 × 100
+      // PATH 2: HYBRID (User answered some questions + intelligent inference)
+      // Confidence = (Answered + Inferred) / Total × 100
       // coveragePercentage already includes both answered and inferred
       const factsPercentage = Math.round((answeredCount / totalQuestions) * 100);
       const inferencePercentage = Math.round((inferredQuestions.length / totalQuestions) * 100);
@@ -507,7 +580,7 @@ M = E - N + 2P = number`,
       confidenceData = {
         score: coveragePercentage,
         reason: `Comprehensive Analysis - Partial Q&A with Smart Inference (${coveragePercentage}% confidence)
-   User-Provided Answers: ${answeredCount}/15 (${factsPercentage}%)
+   User-Provided Answers: ${answeredCount}/${totalQuestions} (${factsPercentage}%)
    Intelligent Inference: ${inferredQuestions.length} derived answers (${inferencePercentage}%)
    Total Coverage: ${coveragePercentage}%
    Analysis Method: AI review combined with user Q&A and contextual inference
@@ -543,6 +616,18 @@ M = E - N + 2P = number`,
         analysispath: "direct"
       };
       console.log(`\n📊 PATH 3 (DIRECT): ${wordCount} words, ${indicatorCount} indicators detected`);
+    }
+
+    // Conflicting answers make the analysis ambiguous: the baseline is not final until they are resolved
+    if (ambiguities.length > 0) {
+      const capped = Math.min(confidenceData.score, AMBIGUOUS_CONFIDENCE_CAP);
+      confidenceData = {
+        ...confidenceData,
+        score: capped,
+        reason: `AMBIGUOUS: ${ambiguities.length} answer conflict(s) found - resolve them before treating this score as final (confidence capped at ${capped}%).
+${ambiguities.map((a) => `   - ${a}`).join("\n")}
+${confidenceData.reason}`,
+      };
     }
 
     console.log("\n🧮 FORMULA CALCULATION (McCabe Cyclomatic Complexity):");
@@ -611,17 +696,18 @@ M = E - N + 2P = number`,
       complexityScore: m,
       testScenarios: testScenarios,
       analysis: `N=${n}, E=${e}, P=${p} → M = ${e} - ${n} + 2(${p}) = ${m}`,
-      decisionPoints: nodesList.filter(
-        (node) => node.toLowerCase().includes("decision") || node.toLowerCase().includes("check")
-      ),
+      // Decision points = steps with more than one way out in the listed graph
+      decisionPoints: buildGraphBreakdown(nodesList, edgesList, pathsList).nodes.decisionList,
       alternativePaths: p,
       reasoning: reasoning,
       confidenceScore: confidenceData.score,
       confidenceReason: confidenceData.reason,
+      ambiguities,
       // THREE-PATH METRICS: Show analysis path and breakdown
       analyzedScenarios: {
         analysisPath: analysispath,
         totalQuestions: totalQuestions,
+        ambiguous: ambiguities.length > 0,
 
         ...(analysispath === "guided" && {
           answeredQuestions: answeredCount,
@@ -1479,7 +1565,7 @@ export function parseCompactGraph(text: string): CompactGraph | null {
   const sections: Record<string, string[]> = {};
   let current = "";
   for (const line of lines) {
-    const header = line.match(/^(REASONING|NODES|EDGES|PATHS|CALCULATION)\s*:?\s*$/i);
+    const header = line.match(/^(REASONING|NODES|EDGES|PATHS|CALCULATION|AMBIGUITIES)\s*:?\s*$/i);
     if (header) {
       // Claude sometimes repeats a header (e.g. "NODES:" again before "N = 21"), so append
       current = header[1].toUpperCase();
@@ -1567,9 +1653,9 @@ export function parseCompactGraph(text: string): CompactGraph | null {
 // Used by the API route when Claude does not answer in time: builds the
 // requirement-aware estimate instead of a generic placeholder graph.
 export function createTimeoutFallback(requirementText: string): ComplexityAnalysis {
-  const answered = Math.min((requirementText.match(/A:\s*Selected:/gm) || []).length, 15);
-  const path: "guided" | "hybrid" | "direct" = answered >= 8 ? "guided" : answered > 0 ? "hybrid" : "direct";
-  const fallback = createFallbackAnalysis(requirementText, path, answered, Math.round((answered / 15) * 100));
+  const { total, answered } = countAnswersInText(requirementText);
+  const path = analysisMode(answered, total);
+  const fallback = createFallbackAnalysis(requirementText, path, answered, total ? Math.round((answered / total) * 100) : 0);
   return {
     ...fallback,
     analysis: `${fallback.analysis} (The AI analysis did not finish in time.)`,
@@ -1626,14 +1712,9 @@ function createFallbackAnalysis(
   const pathCount = paths.length;
   const complexity = edgeCount - nodeCount + 2 * pathCount;
 
-  const extractedDecisionPoints = extractMeaningfulDecisionPoints(requirementText, Math.min(Math.max(pathCount - 1, 1), 10));
-
-  // Fallback: filter nodes if no decision points extracted
-  const decisionPoints = extractedDecisionPoints.length > 0
-    ? extractedDecisionPoints
-    : nodes
-        .filter(n => n.includes("Decision") || n.includes("Check") || n.includes("Verify"))
-        .slice(0, Math.min(estimate.estimatedPaths - 1, 10));
+  // Decision points are the steps where the generated graph branches, so the list
+  // always matches the graph (keyword templates could name decisions not in the requirement)
+  const decisionPoints = buildGraphBreakdown(nodes, edges, paths).nodes.decisionList;
 
   const fallbackConfidence = Math.min(estimate.adjustedConfidence, FALLBACK_CONFIDENCE_CAP);
   const qaCoverage = Math.round(((answeredQuestionsCount ?? 0) / 15) * 100);
@@ -1648,7 +1729,7 @@ function createFallbackAnalysis(
     complexityScore: complexity,
     testScenarios: Math.max(2 * pathCount, 2),
     analysis: `ESTIMATE (primary analysis unavailable). N=${nodeCount}, E=${edgeCount} and P=${pathCount} are counted from a graph generated from the requirement text, so treat this score as indicative and validate it before relying on it.`,
-    decisionPoints: decisionPoints.length > 0 ? decisionPoints : extractedDecisionPoints,
+    decisionPoints,
     alternativePaths: pathCount,
     reasoning: `Fallback estimate. Counts come from the generated graph: N=${nodeCount}, E=${edgeCount}, P=${pathCount} distinct Start-to-End paths. M = E - N + 2P = ${complexity}.`,
     confidenceScore: fallbackConfidence,

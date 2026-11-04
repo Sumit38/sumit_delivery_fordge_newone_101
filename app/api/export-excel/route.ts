@@ -20,6 +20,12 @@ interface ScenarioInput {
   expectedResult?: string;
   testCases?: TestCaseInput[];
   isTemplate?: boolean;
+  // Path-based scenarios
+  pathId?: string;
+  kind?: string;
+  route?: string[];
+  decisionOutcomes?: string[];
+  wording?: string;
 }
 
 const COMPLEXITY_MULTIPLIER: Record<string, number> = { Low: 1, Medium: 2, High: 3, "Very High": 4 };
@@ -89,6 +95,10 @@ export async function POST(request: NextRequest) {
     const m = e - n + 2 * p;
     const level = m <= 10 ? "Low" : m <= 30 ? "Medium" : m <= 100 ? "High" : "Very High";
     const totalTestCases = valid.reduce((sum, s) => sum + (s.testCases?.length || 0), 0);
+    const pathBased = valid.some((s) => typeof s.pathId === "string");
+    const pathIds = new Set(valid.map((s) => s.pathId).filter(Boolean));
+    const scenarioId = (s: ScenarioInput, i: number) =>
+      pathBased && s.id ? `TS-${String(s.id).replace("+", "POS").replace("-", "NEG")}` : `TS-${String(i + 1).padStart(3, "0")}`;
 
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "DeliveryForge";
@@ -112,6 +122,18 @@ export async function POST(request: NextRequest) {
       { item: "Complexity Level", value: level },
       { item: "Estimated Test Scenarios (2P)", value: 2 * p },
       { item: "Scenarios in this file", value: valid.length },
+      ...(pathBased
+        ? [
+            { item: "How scenarios were built", value: "One positive and one negative scenario per Start-to-End path (2P), from the analysis' stored paths" },
+            {
+              item: "Coverage check",
+              value:
+                valid.length === 2 * pathIds.size
+                  ? `OK: ${valid.length} scenarios = 2 × ${pathIds.size} paths`
+                  : `Check: ${valid.length} scenarios for ${pathIds.size} paths (expected ${2 * pathIds.size})`,
+            },
+          ]
+        : []),
       { item: "Test Cases in this file", value: totalTestCases },
       {
         item: "Test Case Complexity Rule",
@@ -127,6 +149,14 @@ export async function POST(request: NextRequest) {
     const scenarioSheet = workbook.addWorksheet("Test Scenarios");
     scenarioSheet.columns = [
       { header: "Scenario ID", key: "id", width: 12 },
+      ...(pathBased
+        ? [
+            { header: "Path ID", key: "pathId", width: 9 },
+            { header: "Type", key: "kind", width: 10 },
+            { header: "Decision Outcomes", key: "outcomes", width: 45 },
+            { header: "Route (Start to End)", key: "route", width: 60 },
+          ]
+        : []),
       { header: "Scenario Name", key: "name", width: 36 },
       { header: "Complexity", key: "complexity", width: 12 },
       { header: "Source", key: "source", width: 12 },
@@ -139,10 +169,14 @@ export async function POST(request: NextRequest) {
     ];
     valid.forEach((s, i) => {
       scenarioSheet.addRow({
-        id: `TS-${String(i + 1).padStart(3, "0")}`,
+        id: scenarioId(s, i),
+        pathId: s.pathId || "",
+        kind: s.kind || "",
+        outcomes: numbered(list(s.decisionOutcomes)),
+        route: list(s.route).join(" → "),
         name: s.name,
         complexity: s.complexity || "Medium",
-        source: s.isTemplate ? "Template" : "Detailed",
+        source: pathBased ? (s.wording === "AI" ? "Path + AI wording" : "Path") : s.isTemplate ? "Template" : "Detailed",
         description: s.description || "",
         actors: list(s.actors).join(", "),
         preconditions: numbered(list(s.preconditions)),
@@ -171,7 +205,7 @@ export async function POST(request: NextRequest) {
       { header: "Remarks", key: "remarks", width: 30 },
     ];
     valid.forEach((s, i) => {
-      const scId = `TS-${String(i + 1).padStart(3, "0")}`;
+      const scId = scenarioId(s, i);
       const scComplexity = s.complexity || "Medium";
       const multiplier = COMPLEXITY_MULTIPLIER[scComplexity] || 2;
       (s.testCases || []).forEach((tc, j) => {

@@ -7,6 +7,7 @@ import {
   REQUIREMENT_FILE_ACCEPT,
   REQUIREMENT_FILE_LABEL,
 } from "@/lib/read-requirement-file";
+import { OverLimitWarning, UploadLimitsNote } from "@/components/UploadLimitsNote";
 
 interface Question {
   id: string;
@@ -28,7 +29,30 @@ interface RefinedData {
 
 interface RefineRequirementProps {
   onRefinementComplete?: (refinedRequirement: string) => void;
-  onAnalyzeRequirement?: (refinedRequirement: string, title: string) => void;
+  onAnalyzeRequirement?: (refinedRequirement: string, title: string, questionsMetadata?: AnswerStatus[]) => void;
+}
+
+// Which questions the user answered and which were skipped (the AI's suggestion was kept).
+// Sent with the analysis so guided / hybrid / direct is decided from facts, not from the text.
+export interface AnswerStatus {
+  questionNumber: number;
+  question: string;
+  answer: string;
+  isAnswered: boolean;
+}
+
+export function answerStatusOf(questions: Question[]): AnswerStatus[] {
+  return questions.map((q, i) => {
+    const selected = q.selectedOptions.length > 0 ? `Selected: ${q.selectedOptions.join(", ")}` : "";
+    const typed = q.userAnswer.trim();
+    const answer = [selected, typed].filter(Boolean).join("\n");
+    return {
+      questionNumber: i + 1,
+      question: q.question,
+      answer: answer || q.suggestedAnswer,
+      isAnswered: answer.length > 0,
+    };
+  });
 }
 
 export default function RefineRequirement({ onRefinementComplete, onAnalyzeRequirement }: RefineRequirementProps) {
@@ -336,6 +360,10 @@ Generated from raw requirement: "${rawRequirement}"
               </button>
             </div>
 
+            <div className="mb-4">
+              <UploadLimitsNote />
+            </div>
+
             {/* Paste Text Input */}
             {inputMethod === "text" && (
               <div>
@@ -350,6 +378,7 @@ Generated from raw requirement: "${rawRequirement}"
                 <p className="text-xs text-slate-500 mt-2">
                   Minimum 30 characters. Be as detailed or vague as you want.
                 </p>
+                <OverLimitWarning length={rawRequirement.length} />
               </div>
             )}
 
@@ -377,6 +406,7 @@ Generated from raw requirement: "${rawRequirement}"
                     ✓ File loaded: {uploadedFileName} ({rawRequirement.length.toLocaleString()} characters)
                   </p>
                 )}
+                {uploadedFileName && !fileLoading && <OverLimitWarning length={rawRequirement.length} />}
                 <p className="text-xs text-slate-500 mt-2">
                   Supported: {REQUIREMENT_FILE_LABEL}. Scanned (image-only) PDFs can&apos;t be read; paste their text instead.
                 </p>
@@ -635,7 +665,11 @@ Generated from raw requirement: "${rawRequirement}"
                 setAnalyzing(true);
                 // Directly analyze and go to history
                 if (onAnalyzeRequirement) {
-                  await onAnalyzeRequirement(comprehensiveRequirement, requirementTitle || refinedData?.useCaseName || "Refined Requirement");
+                  await onAnalyzeRequirement(
+                    comprehensiveRequirement,
+                    requirementTitle || refinedData?.useCaseName || "Refined Requirement",
+                    refinedData ? answerStatusOf(refinedData.questions) : undefined
+                  );
                 } else {
                   // Fallback: switch to analyze tab
                   if (onRefinementComplete) {
