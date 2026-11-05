@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { requireUser } from "@/lib/require-user";
 import { buildGraphBreakdown, cleanFormulaText } from "@/lib/graph-breakdown";
-import { ambiguityNotes } from "@/lib/qa-status";
+import { findingNotes } from "@/lib/qa-status";
 
 export async function GET(request: NextRequest) {
   try {
@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
     // Worked out from the stored graph, so older analyses get the breakdown too
     const breakdown = buildGraphBreakdown(storedNodes, storedEdges, storedPaths);
     // Conflicting Q&A answers are shown first under "Checks"
-    breakdown.notes = [...ambiguityNotes(analysisData.ambiguities), ...breakdown.notes];
+    breakdown.notes = [...findingNotes(analysisData), ...breakdown.notes];
     // Show each route once; older records can list the same route twice or a heading as a "path"
     const seenRoutes = new Set<string>();
     const displayPaths = storedPaths.filter((path) => {
@@ -105,6 +105,10 @@ export async function GET(request: NextRequest) {
             merge: {
               documents: analysisData.mergedFrom,
               sharedSteps: Array.isArray(analysisData.sharedSteps) ? analysisData.sharedSteps : [],
+              // Region view: which document each step / edge / path came from (newer combined analyses)
+              ...(analysisData.origins ? { origins: analysisData.origins } : {}),
+              ...(analysisData.comparison ? { comparison: analysisData.comparison } : {}),
+              ...(Array.isArray(analysisData.stepMatches) ? { stepMatches: analysisData.stepMatches } : {}),
             },
           }
         : {}),

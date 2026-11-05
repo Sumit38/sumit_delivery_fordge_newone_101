@@ -10,6 +10,9 @@ import {
   buildPathTree,
   buildPathTreeMermaid,
   renderSvg,
+  svgForDownload,
+  REGION_COLORS,
+  SHARED_COLOR,
   type AnalysisDetails,
   type PathTreeNode,
 } from "@/lib/flow-diagram";
@@ -45,6 +48,15 @@ function Outline({ node, depth = 0 }: { node: PathTreeNode; depth?: number }) {
         </ul>
       </details>
     </li>
+  );
+}
+
+function Swatch({ color, label }: { color: { fill: string; stroke: string }; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <i className="inline-block w-3 h-3 rounded-sm" style={{ background: color.fill, border: `1px solid ${color.stroke}` }} />
+      {label}
+    </span>
   );
 }
 
@@ -93,8 +105,12 @@ export default function PathTreePage() {
     let cancelled = false;
     const code =
       view === "tree"
-        ? buildPathTreeMermaid(details.metrics.paths || [], { direction: "TD", maxNodes: MAX_DRAWN_TREE_NODES })
-        : buildFlowMermaid(details.metrics.nodes || [], details.metrics.edges || []);
+        ? buildPathTreeMermaid(details.metrics.paths || [], {
+            direction: "TD",
+            maxNodes: MAX_DRAWN_TREE_NODES,
+            regions: details.merge?.origins?.paths,
+          })
+        : buildFlowMermaid(details.metrics.nodes || [], details.metrics.edges || [], details.merge?.origins);
     setSvg("");
     setDrawError("");
     if (!code) {
@@ -118,7 +134,7 @@ export default function PathTreePage() {
 
   const downloadSvg = () => {
     if (!svg || !details) return;
-    const blob = new Blob([svg], { type: "image/svg+xml" });
+    const blob = new Blob([svgForDownload(svg)], { type: "image/svg+xml" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -199,6 +215,17 @@ export default function PathTreePage() {
             </>
           )}
         </div>
+
+        {details.merge?.origins && view !== "outline" && (
+          <div className="flex gap-4 flex-wrap text-xs text-slate-600">
+            <Swatch color={{ fill: "#d1fae5", stroke: "#059669" }} label="Start / End" />
+            <Swatch color={SHARED_COLOR} label="In more than one document" />
+            {details.merge.documents.map((d, i) =>
+              REGION_COLORS[i] ? <Swatch key={i} color={REGION_COLORS[i]} label={`Only in ${d.title}`} /> : null
+            )}
+            <span>Diamond = decision point (long names are shortened; the Outline shows them in full)</span>
+          </div>
+        )}
 
         {view === "tree" && treeTooBig ? (
           <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-900">

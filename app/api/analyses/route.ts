@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { requireUser } from "@/lib/require-user";
 import { buildGraphBreakdown } from "@/lib/graph-breakdown";
-import { ambiguityNotes } from "@/lib/qa-status";
+import { findingNotes } from "@/lib/qa-status";
 
 export async function GET(request: NextRequest) {
   try {
@@ -84,7 +84,7 @@ export async function GET(request: NextRequest) {
             forwardEdges: bd.edges.forward,
             loopBackEdges: bd.edges.loopBack,
             graphRoutes: bd.paths.graphRoutes,
-            notes: [...ambiguityNotes(analysisData.ambiguities), ...bd.notes],
+            notes: [...findingNotes(analysisData), ...bd.notes],
           } : undefined,
           createdAt: req.created_at,
           requirementText: req.document_text || "",

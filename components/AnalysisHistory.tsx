@@ -363,8 +363,8 @@ export default function AnalysisHistory({ onAnalysisSelect, onAnalysisDelete }: 
                       const analysisDetails = await fetchAnalysisDetails(analysis.id);
                       // Add the Mermaid source so the downloaded file also carries the diagram
                       analysisDetails.flowDiagram = {
-                        mermaid: buildFlowMermaid(analysisDetails.metrics?.nodes || [], analysisDetails.metrics?.edges || []),
-                        pathTreeMermaid: buildPathTreeMermaid(analysisDetails.metrics?.paths || []),
+                        mermaid: buildFlowMermaid(analysisDetails.metrics?.nodes || [], analysisDetails.metrics?.edges || [], analysisDetails.merge?.origins),
+                        pathTreeMermaid: buildPathTreeMermaid(analysisDetails.metrics?.paths || [], { regions: analysisDetails.merge?.origins?.paths, maxNodes: 3000 }),
                         howToView: "Paste the mermaid text into https://mermaid.live to view the diagram",
                       };
 

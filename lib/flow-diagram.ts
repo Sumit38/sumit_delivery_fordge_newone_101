@@ -3,6 +3,8 @@
 // complexity score were derived. Nothing here changes N, E, P or M.
 
 import { buildGraphBreakdown, cleanFormulaText, type GraphBreakdown } from "./graph-breakdown";
+import type { MergeOrigins } from "./merge-analyses";
+import type { DocumentComparison } from "./merge-compare";
 
 export interface FlowEdge {
   from: string;
@@ -35,8 +37,11 @@ export interface AnalysisDetails {
   };
   // Set when the analysis combines several requirement documents
   merge?: {
-    documents: Array<{ title: string; n: number; e: number; p: number; m: number }>;
+    documents: Array<{ title: string; n: number; e: number; p: number; m: number; confidenceScore?: number | null; analysisMode?: string | null }>;
     sharedSteps: string[];
+    origins?: MergeOrigins;
+    comparison?: DocumentComparison;
+    stepMatches?: Array<{ doc: number; step: string; matchedDoc: number; matchedStep: string }>;
   };
 }
 
@@ -61,6 +66,45 @@ function escapeHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
+// Decision boxes are diamonds, which grow in both directions with their text, so a
+// long label pushes the graph out of the window. Their text is wrapped onto at most
+// two short lines and cut with "…"; the full name stays in the tables and the outline.
+const DECISION_LINE_CHARS = 22;
+const DECISION_MAX_LINES = 2;
+
+export function shortLines(text: string, lineChars = DECISION_LINE_CHARS, maxLines = DECISION_MAX_LINES): string[] {
+  const words = String(text ?? "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  const lines: string[] = [];
+  let current = "";
+  let cut = false;
+  for (const raw of words) {
+    const word = raw.length > lineChars ? `${raw.slice(0, lineChars - 1)}…` : raw;
+    const next = current ? `${current} ${word}` : word;
+    if (next.length <= lineChars) {
+      current = next;
+      continue;
+    }
+    lines.push(current);
+    current = word;
+    if (lines.length === maxLines) {
+      cut = true;
+      break;
+    }
+  }
+  if (!cut && current) lines.push(current);
+  if (cut || lines.length > maxLines) {
+    const kept = lines.slice(0, maxLines);
+    const last = kept[maxLines - 1].replace(/…$/, "");
+    kept[maxLines - 1] = `${last.length > lineChars - 1 ? last.slice(0, lineChars - 1) : last}…`;
+    return kept;
+  }
+  return lines;
+}
+
+function decisionLabel(text: string): string {
+  return shortLines(text).map(mermaidText).join("<br/>");
+}
+
 const isStart = (name: string) => /^start$/i.test(name.trim());
 const isEnd = (name: string) => /^end$/i.test(name.trim());
 
@@ -71,14 +115,41 @@ export function findBranchNodes(edges: FlowEdge[]): string[] {
   return [...outCount.entries()].filter(([, c]) => c > 1).map(([n]) => n);
 }
 
+// Region colours for combined analyses: one per document, plus one for shared parts
+export const SHARED_COLOR = { fill: "#f1f5f9", stroke: "#334155", text: "#0f172a" };
+export const REGION_COLORS = [
+  { fill: "#ffedd5", stroke: "#ea580c", text: "#7c2d12" },
+  { fill: "#ede9fe", stroke: "#7c3aed", text: "#4c1d95" },
+  { fill: "#ccfbf1", stroke: "#0d9488", text: "#134e4a" },
+];
+
+// Keeps only the steps and transitions one document has (for the per-region view).
+export function filterToDocument(
+  nodes: string[],
+  edges: FlowEdge[],
+  origins: MergeOrigins,
+  doc: number
+): { nodes: string[]; edges: FlowEdge[]; origins: MergeOrigins } {
+  const keepEdge = edges.map((_, i) => (origins.edges[i] || []).includes(doc));
+  return {
+    nodes: nodes.filter((n) => (origins.nodes[n] || []).includes(doc)),
+    edges: edges.filter((_, i) => keepEdge[i]),
+    origins: { ...origins, edges: origins.edges.filter((_, i) => keepEdge[i]) },
+  };
+}
+
 // Control-flow graph: every node and edge from the analysis, drawn top to bottom.
-export function buildFlowMermaid(nodes: string[], inputEdges: FlowEdge[]): string {
+// With `regions` (a combined analysis), shared steps and transitions are drawn in one
+// colour and each document's own ones in its region colour.
+export function buildFlowMermaid(nodes: string[], inputEdges: FlowEdge[], regions?: MergeOrigins): string {
   // Older saved analyses can list the same edge twice; draw each arrow once
   const seenEdges = new Set<string>();
-  const edges = inputEdges.filter((e) => {
+  const edgeOwners: number[][] = [];
+  const edges = inputEdges.filter((e, i) => {
     const key = `${e.from}|${e.to}`;
     if (seenEdges.has(key)) return false;
     seenEdges.add(key);
+    edgeOwners.push(regions?.edges[i] || []);
     return true;
   });
   const allNodes = [...new Set(nodes)];
@@ -96,7 +167,7 @@ export function buildFlowMermaid(nodes: string[], inputEdges: FlowEdge[]): strin
     const id = ids.get(n)!;
     const label = mermaidText(n);
     if (isStart(n) || isEnd(n)) lines.push(`  ${id}(["${label}"])`);
-    else if (branches.has(n)) lines.push(`  ${id}{"${label}"}`);
+    else if (branches.has(n)) lines.push(`  ${id}{"${decisionLabel(n)}"}`);
     else lines.push(`  ${id}["${label}"]`);
   });
   edges.forEach((e) => {
@@ -105,13 +176,51 @@ export function buildFlowMermaid(nodes: string[], inputEdges: FlowEdge[]): strin
   });
 
   lines.push("  classDef startEnd fill:#d1fae5,stroke:#059669,stroke-width:2px,color:#064e3b");
-  lines.push("  classDef branch fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a");
   const startEnd = allNodes.filter((n) => isStart(n) || isEnd(n)).map((n) => ids.get(n));
+
+  if (regions) {
+    pushRegionClassDefs(lines);
+    const groups = new Map<string, string[]>();
+    allNodes.forEach((n) => {
+      if (isStart(n) || isEnd(n)) return;
+      const owners = regions.nodes[n] || [];
+      const cls = regionClass(owners);
+      if (cls) groups.set(cls, [...(groups.get(cls) || []), ids.get(n)!]);
+    });
+    if (startEnd.length) lines.push(`  class ${startEnd.join(",")} startEnd`);
+    groups.forEach((list, cls) => lines.push(`  class ${list.join(",")} ${cls}`));
+    pushRegionLinkStyles(lines, edgeOwners);
+    return lines.join("\n");
+  }
+
+  lines.push("  classDef branch fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a");
   const branchIds = allNodes.filter((n) => branches.has(n) && !isStart(n) && !isEnd(n)).map((n) => ids.get(n));
   if (startEnd.length) lines.push(`  class ${startEnd.join(",")} startEnd`);
   if (branchIds.length) lines.push(`  class ${branchIds.join(",")} branch`);
 
   return lines.join("\n");
+}
+
+function pushRegionClassDefs(lines: string[]) {
+  const style = (c: { fill: string; stroke: string; text: string }) => `fill:${c.fill},stroke:${c.stroke},stroke-width:2px,color:${c.text}`;
+  lines.push(`  classDef shared ${style(SHARED_COLOR)}`);
+  REGION_COLORS.forEach((c, i) => lines.push(`  classDef region${i} ${style(c)}`));
+}
+
+// "shared" when more than one document has it, "region<i>" when only document i has it
+function regionClass(owners: number[]): string {
+  if (owners.length > 1) return "shared";
+  return owners.length === 1 && owners[0] < REGION_COLORS.length ? `region${owners[0]}` : "";
+}
+
+// Colours each arrow; `edgeOwners` is in the order the arrows were written
+function pushRegionLinkStyles(lines: string[], edgeOwners: number[][]) {
+  const links = new Map<string, number[]>();
+  edgeOwners.forEach((owners, i) => {
+    const color = owners.length > 1 ? SHARED_COLOR.stroke : owners.length === 1 ? REGION_COLORS[owners[0]]?.stroke : undefined;
+    if (color) links.set(color, [...(links.get(color) || []), i]);
+  });
+  links.forEach((list, color) => lines.push(`  linkStyle ${list.join(",")} stroke:${color},stroke-width:2px`));
 }
 
 export interface PathTreeNode {
@@ -158,29 +267,81 @@ export function isPathTreeTooLarge(paths: string[][]): boolean {
   return !!tree && tree.size > MAX_TREE_NODES;
 }
 
+// "P1, P2, P3 +4 more" — long lists of path numbers would stretch the box
+function pathList(pathNos: number[], max = 5): string {
+  const shown = pathNos.slice(0, max).map((n) => `P${n}`).join(", ");
+  return pathNos.length > max ? `${shown} +${pathNos.length - max} more` : shown;
+}
+
+// Which documents' paths pass through each step of the tree (combined analyses)
+function treeOwners(root: PathTreeNode, pathDocs: number[][]): Map<string, number[]> {
+  const owners = new Map<string, number[]>();
+  const visit = (node: PathTreeNode): Set<number> => {
+    const docs = new Set<number>();
+    node.pathNos.forEach((n) => (pathDocs[n - 1] || []).forEach((d) => docs.add(d)));
+    node.children.forEach((child) => visit(child).forEach((d) => docs.add(d)));
+    owners.set(node.id, [...docs].sort((a, b) => a - b));
+    return docs;
+  };
+  visit(root);
+  return owners;
+}
+
 // Mermaid source for the path tree. The report draws it left to right and stops
 // at MAX_TREE_NODES; the full-page view draws it top to bottom with no limit.
+// With `regions` (a combined analysis: the documents of each path, in path order),
+// steps and arrows are coloured shared / only-in-one-document like the flow graph.
 export function buildPathTreeMermaid(
   paths: string[][],
-  options: { direction?: "LR" | "TD"; maxNodes?: number } = {}
+  options: { direction?: "LR" | "TD"; maxNodes?: number; regions?: number[][] } = {}
 ): string | null {
   const tree = buildPathTree(paths);
   if (!tree) return null;
   if (tree.size > (options.maxNodes ?? MAX_TREE_NODES)) return null;
   const { root } = tree;
+  const owners = options.regions ? treeOwners(root, options.regions) : null;
 
   const lines = [`flowchart ${options.direction || "LR"}`];
+  const edgeOwners: number[][] = [];
   const walk = (node: PathTreeNode) => {
-    const suffix = node.pathNos.length ? ` ✓ ${node.pathNos.map((n) => `P${n}`).join(", ")}` : "";
-    const label = mermaidText(node.label) + suffix;
-    lines.push(node.children.size > 1 ? `  ${node.id}{"${label}"}` : `  ${node.id}["${label}"]`);
+    const suffix = node.pathNos.length ? ` ✓ ${pathList(node.pathNos)}` : "";
+    if (node.children.size > 1) lines.push(`  ${node.id}{"${decisionLabel(node.label)}${suffix}"}`);
+    else lines.push(`  ${node.id}["${mermaidText(node.label)}${suffix}"]`);
     node.children.forEach((child) => {
       lines.push(`  ${node.id} --> ${child.id}`);
+      edgeOwners.push(owners?.get(child.id) || []);
       walk(child);
     });
   };
   walk(root);
+
+  if (owners) {
+    lines.push("  classDef startEnd fill:#d1fae5,stroke:#059669,stroke-width:2px,color:#064e3b");
+    pushRegionClassDefs(lines);
+    const groups = new Map<string, string[]>();
+    const visit = (node: PathTreeNode) => {
+      const cls = isStart(node.label) || isEnd(node.label) ? "startEnd" : regionClass(owners.get(node.id) || []);
+      if (cls) groups.set(cls, [...(groups.get(cls) || []), node.id]);
+      node.children.forEach(visit);
+    };
+    visit(root);
+    groups.forEach((list, cls) => lines.push(`  class ${list.join(",")} ${cls}`));
+    pushRegionLinkStyles(lines, edgeOwners);
+  }
   return lines.join("\n");
+}
+
+// Mermaid's drawing is meant for a web page: its labels are HTML, which can contain
+// tags like <br> that are not valid in a standalone .svg file. Re-writing it as XML
+// (the browser does the conversion) makes the downloaded file open everywhere.
+export function svgForDownload(svg: string): string {
+  const header = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+  if (typeof DOMParser === "undefined" || typeof XMLSerializer === "undefined") {
+    return header + svg.replace(/<br\s*>/gi, "<br/>").replace(/&nbsp;/g, "&#160;");
+  }
+  const element = new DOMParser().parseFromString(svg, "text/html").querySelector("svg");
+  if (!element) return svg;
+  return header + new XMLSerializer().serializeToString(element);
 }
 
 export async function renderSvg(code: string, id: string): Promise<string> {
@@ -197,9 +358,69 @@ export async function renderSvg(code: string, id: string): Promise<string> {
   return svg;
 }
 
+function regionLegendHtml(titles: string[]): string {
+  const sw = (c: { fill: string; stroke: string }) => `<i class="sw" style="background:${c.fill};border:1px solid ${c.stroke}"></i>`;
+  return [
+    `<span><i class="sw" style="background:#d1fae5;border:1px solid #059669"></i>Start / End</span>`,
+    `<span>${sw(SHARED_COLOR)}In more than one document</span>`,
+    ...titles.map((t, i) => (REGION_COLORS[i] ? `<span>${sw(REGION_COLORS[i])}Only in ${escapeHtml(t)}</span>` : "")),
+    `<span>Diamond = decision point</span>`,
+  ].join("");
+}
+
+// Region comparison: common paths, where similar paths split, decisions that differ
+function comparisonHtml(c: DocumentComparison, matches: NonNullable<AnalysisDetails["merge"]>["stepMatches"] = []): string {
+  const t = (i: number) => escapeHtml(c.docTitles[i] || `Document ${i + 1}`);
+  const only = c.onlySteps
+    .map((o) => `<p><b>Only in ${t(o.doc)} (${o.steps.length}):</b> ${o.steps.length ? o.steps.map(escapeHtml).join(", ") : "none"}</p>`)
+    .join("");
+  const pathRows = c.paths
+    .map(
+      (r) => `<tr><td>${r.path} (${t(r.doc)})</td><td>${r.closestPath ? `${r.closestPath} (${t(r.otherDoc)})` : "none"}</td><td>${r.sharedSteps} of ${r.steps}</td><td>${
+        r.differences.length
+          ? `<ol style="margin:0;padding-left:18px">${r.differences
+              .map(
+                (d) =>
+                  `<li>After <b>${escapeHtml(d.after)}</b>: ${t(r.doc)} &rarr; ${escapeHtml(d.thisSteps.join(", ") || "(goes straight on)")}; ${t(r.otherDoc)} &rarr; ${escapeHtml(d.otherSteps.join(", ") || "(goes straight on)")}; back together at <b>${escapeHtml(d.rejoin)}</b></li>`
+              )
+              .join("")}</ol>`
+          : "Same steps in the same order"
+      }</td></tr>`
+    )
+    .join("");
+  const decisionRows = c.decisions
+    .map(
+      (dd) => `<tr><td>${escapeHtml(dd.step)}</td><td>${dd.outcomes
+        .map((o) => `<b>${t(o.doc)}:</b> ${o.outcomes.map(escapeHtml).join("; ")}`)
+        .join("<br>")}</td></tr>`
+    )
+    .join("");
+  const matchList = (matches || [])
+    .map((m) => `<li>&ldquo;${escapeHtml(m.step)}&rdquo; (${t(m.doc)}) = &ldquo;${escapeHtml(m.matchedStep)}&rdquo; (${t(m.matchedDoc)})</li>`)
+    .join("");
+  return `
+  <h2>Common and different paths</h2>
+  <div class="card">
+    <p><b>Common paths (same route in more than one document):</b> ${c.commonPaths.length ? c.commonPaths.join(", ") : "none. Each document's paths differ somewhere, so the table below shows where."}</p>
+    ${only}
+    ${matchList ? `<details><summary>Steps worded differently but matched as the same step (${(matches || []).length})</summary><ul>${matchList}</ul></details>` : ""}
+    <h3>Where each path differs from the closest path in the other document</h3>
+    <table><tr><th>Path</th><th>Closest path</th><th>Shared steps</th><th>Where they differ</th></tr>${pathRows || '<tr><td colspan="4">Every path is common.</td></tr>'}</table>
+    <h3>Shared decisions with different outcomes</h3>
+    <table><tr><th>Decision</th><th>Outcomes per document</th></tr>${decisionRows || '<tr><td colspan="2">None: shared decisions lead to the same steps.</td></tr>'}</table>
+  </div>`;
+}
+
 function mergeSectionHtml(merge: NonNullable<AnalysisDetails["merge"]>): string {
+  const hasDetails = merge.documents.some((doc) => doc.confidenceScore != null || doc.analysisMode);
+  const modeName = (m?: string | null) => (m ? m.charAt(0).toUpperCase() + m.slice(1) : "-");
   const rows = merge.documents
-    .map((doc, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(doc.title)}</td><td>${doc.n}</td><td>${doc.e}</td><td>${doc.p}</td><td>${doc.m}</td></tr>`)
+    .map(
+      (doc, i) =>
+        `<tr><td>${i + 1}</td><td>${escapeHtml(doc.title)}</td><td>${doc.n}</td><td>${doc.e}</td><td>${doc.p}</td><td>${doc.m}</td>${
+          hasDetails ? `<td>${escapeHtml(modeName(doc.analysisMode))}</td><td>${doc.confidenceScore != null ? `${doc.confidenceScore}%` : "-"}</td>` : ""
+        }</tr>`
+    )
     .join("");
   const shared = merge.sharedSteps.length
     ? `Steps found in more than one document (counted once): ${merge.sharedSteps.map(escapeHtml).join(", ")}.`
@@ -208,8 +429,8 @@ function mergeSectionHtml(merge: NonNullable<AnalysisDetails["merge"]>): string 
   <h2>Combined from ${merge.documents.length} documents</h2>
   <div class="card">
     <p class="muted">Each document was analysed on its own, then the graphs were joined: Start and End are shared, steps with the same name are counted once, and repeated edges and paths are counted once. ${shared}</p>
-    <table><tr><th>#</th><th>Document</th><th>N</th><th>E</th><th>P</th><th>M (own)</th></tr>${rows}</table>
-  </div>`;
+    <table><tr><th>#</th><th>Document</th><th>N</th><th>E</th><th>P</th><th>M (own)</th>${hasDetails ? "<th>Way of analysis</th><th>Confidence</th>" : ""}</tr>${rows}</table>
+  </div>${merge.comparison ? comparisonHtml(merge.comparison, merge.stepMatches) : ""}`;
 }
 
 // Link to the full-page path tree view in the app (absolute, so it works from a downloaded file)
@@ -321,17 +542,23 @@ ${d.merge ? mergeSectionHtml(d.merge) : ""}
   </div>
 
   <h2>2. Control flow graph</h2>
-  <div class="legend muted">
+  <div class="legend muted">${
+    d.merge?.origins
+      ? regionLegendHtml(d.merge.documents.map((doc) => doc.title))
+      : `
     <span><i class="sw" style="background:#d1fae5;border:1px solid #059669"></i>Start / End</span>
     <span><i class="sw" style="background:#dbeafe;border:1px solid #2563eb"></i>Decision point (branches)</span>
-    <span><i class="sw" style="background:#ececff;border:1px solid #9370db"></i>Step</span>
+    <span><i class="sw" style="background:#ececff;border:1px solid #9370db"></i>Step</span>`
+  }
   </div>
   <div class="card">${flowSvg}</div>
 
   ${
     treeSvg
       ? `<h2>3. Path tree</h2>
-  <p class="muted">Paths are merged where they share the same steps, so each fork shows where the flow splits. Labels P1, P2 &hellip; mark where each path ends.</p>
+  <p class="muted">Paths are merged where they share the same steps, so each fork shows where the flow splits. Labels P1, P2 &hellip; mark where each path ends.</p>${
+    d.merge?.origins ? `<div class="legend muted">${regionLegendHtml(d.merge.documents.map((doc) => doc.title))}</div>` : ""
+  }
   <div class="card">${treeSvg}</div>${treeLink ? `<p class="muted"><a href="${escapeHtml(treeLink)}" target="_blank" rel="noopener">Open the path tree on its own page (top-to-bottom view) &#8599;</a></p>` : ""}`
       : `<h2>3. Path tree</h2>
   <div class="card big-tree">
@@ -354,7 +581,11 @@ ${d.merge ? mergeSectionHtml(d.merge) : ""}
   ${
     d.reasoning?.detailed || d.reasoning?.analysis
       ? `<h2>6. Analysis reasoning</h2><div class="card">${escapeHtml(cleanFormulaText(d.reasoning.detailed || d.reasoning.analysis || ""))}${
-          d.reasoning.confidenceScore ? `<p class="muted">Confidence: ${d.reasoning.confidenceScore}%</p>` : ""
+          d.reasoning.confidenceScore
+            ? `<p class="muted">Confidence: ${d.reasoning.confidenceScore}%</p>${
+                d.reasoning.confidenceReason ? `<pre style="white-space:pre-wrap">${escapeHtml(d.reasoning.confidenceReason)}</pre>` : ""
+              }`
+            : ""
         }</div>`
       : ""
   }
@@ -376,8 +607,8 @@ export async function buildFlowDiagramHtml(details: AnalysisDetails): Promise<st
     throw new Error("This analysis has no stored graph (nodes and edges). Please re-run the analysis.");
   }
 
-  const flowCode = buildFlowMermaid(nodes, edges);
-  const treeCode = buildPathTreeMermaid(details.metrics.paths || []);
+  const flowCode = buildFlowMermaid(nodes, edges, details.merge?.origins);
+  const treeCode = buildPathTreeMermaid(details.metrics.paths || [], { regions: details.merge?.origins?.paths });
   const stamp = Date.now();
   const flowSvg = await renderSvg(flowCode, `flow-${stamp}`);
   let treeSvg: string | null = null;

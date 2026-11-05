@@ -38,6 +38,16 @@ export interface MergedDocumentSummary {
   e: number;
   p: number;
   m: number;
+  // Added when the combined analysis is saved
+  confidenceScore?: number | null;
+  analysisMode?: string | null;
+}
+
+// Which documents (0-based) each part of the combined graph came from
+export interface MergeOrigins {
+  nodes: Record<string, number[]>;
+  edges: number[][]; // same order as MergedAnalysis.edges
+  paths: number[][]; // same order as MergedAnalysis.paths
 }
 
 export interface MergedAnalysis {
@@ -52,6 +62,7 @@ export interface MergedAnalysis {
   calculation: string;
   sharedSteps: string[];
   documents: MergedDocumentSummary[];
+  origins: MergeOrigins;
 }
 
 const isStart = (label: string) => /^start$/i.test(label.trim());
@@ -65,14 +76,17 @@ export function stepKey(label: string): string {
   return text.toLowerCase().replace(/[.,;:!?]+$/, "").trim();
 }
 
-export function mergeAnalyses(docs: MergeInputDocument[]): MergedAnalysis {
+// `aliases` maps a step key to the key of the same step in an earlier document
+// (from step matching), so differently worded steps can be counted once.
+export function mergeAnalyses(docs: MergeInputDocument[], aliases: Record<string, string> = {}): MergedAnalysis {
   if (docs.length < 2) throw new Error("At least 2 analysed documents are needed to combine");
 
   // One label per step; the first document's spelling wins
   const labelByKey = new Map<string, string>();
   const docsByKey = new Map<string, Set<number>>();
   const canonical = (label: string, docIndex: number) => {
-    const key = stepKey(label);
+    const own = stepKey(label);
+    const key = aliases[own] && labelByKey.has(aliases[own]) ? aliases[own] : own;
     if (!labelByKey.has(key)) {
       labelByKey.set(key, key === "start" ? "Start" : key === "end" ? "End" : String(label).replace(/\s+/g, " ").trim());
     }
@@ -85,13 +99,27 @@ export function mergeAnalyses(docs: MergeInputDocument[]): MergedAnalysis {
   const edges: MergeInputEdge[] = [];
   const paths: string[][] = [];
 
+  const edgeDocs = new Map<string, Set<number>>();
+  const pathDocs = new Map<string, Set<number>>();
+  const addOrigin = (map: Map<string, Set<number>>, key: string, doc: number) => {
+    if (!map.has(key)) map.set(key, new Set());
+    map.get(key)!.add(doc);
+  };
+
   docs.forEach((doc, i) => {
     (doc.nodes || []).forEach((node) => nodes.push(canonical(node, i)));
-    (doc.edges || []).forEach((edge) =>
-      edges.push({ from: canonical(edge.from, i), to: canonical(edge.to, i), condition: edge.condition })
-    );
+    (doc.edges || []).forEach((edge) => {
+      const merged = { from: canonical(edge.from, i), to: canonical(edge.to, i), condition: edge.condition };
+      edges.push(merged);
+      addOrigin(edgeDocs, `${merged.from}|${merged.to}`, i);
+    });
     (doc.paths || []).forEach((path) => {
-      if (Array.isArray(path)) paths.push(path.map((step) => canonical(step, i)));
+      if (!Array.isArray(path)) return;
+      const merged = path.map((step) => canonical(step, i));
+      paths.push(merged);
+      addOrigin(pathDocs, merged.join("|"), i);
+      // A step a path takes belongs to that document even if its edge list missed it
+      for (let s = 0; s < merged.length - 1; s++) addOrigin(edgeDocs, `${merged[s]}|${merged[s + 1]}`, i);
     });
   });
 
@@ -128,6 +156,15 @@ export function mergeAnalyses(docs: MergeInputDocument[]): MergedAnalysis {
     .filter(([key, owners]) => key !== "start" && key !== "end" && owners.size > 1)
     .map(([key]) => labelByKey.get(key)!);
 
+  const sorted = (set?: Set<number>) => [...(set || [])].sort((a, b) => a - b);
+  const origins: MergeOrigins = {
+    nodes: Object.fromEntries(mergedNodes.map((label) => [label, sorted(docsByKey.get(stepKey(label)))])),
+    edges: unique.edges.map((edge) => sorted(edgeDocs.get(`${edge.from}|${edge.to}`))),
+    paths: unique.paths.map((path) => sorted(pathDocs.get(path.join("|")))),
+  };
+  // Start and End belong to every document
+  for (const label of ["Start", "End"]) origins.nodes[label] = docs.map((_, i) => i);
+
   const documents = docs.map((doc) => {
     const dn = doc.nodesCount ?? doc.nodes.length;
     const de = doc.edgesCount ?? doc.edges.length;
@@ -154,5 +191,6 @@ export function mergeAnalyses(docs: MergeInputDocument[]): MergedAnalysis {
     calculation: `M = E - N + 2P = ${e} - ${n} + 2(${p}) = ${m}`,
     sharedSteps,
     documents,
+    origins,
   };
 }

@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { buildGraphBreakdown, completeBranchCoverage } from "./graph-breakdown";
-import { AMBIGUOUS_CONFIDENCE_CAP, analysisMode, countAnswersInText, parseAmbiguities } from "./qa-status";
+import { AMBIGUOUS_CONFIDENCE_CAP, analysisMode, countAnswersInText, parseAmbiguities, splitFindings } from "./qa-status";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -107,6 +107,8 @@ export interface ComplexityAnalysis {
   confidenceReason?: string;
   // Answer combinations that cannot all be true (empty when the answers agree)
   ambiguities?: string[];
+  // Gaps in the requirement itself, found when no Q&A was answered (they don't cap confidence)
+  requirementGaps?: string[];
   analyzedScenarios?: AnalyzedScenarios;
 }
 
@@ -329,7 +331,7 @@ M = E - N + 2P = number
 AMBIGUITIES:
 - one line per conflict, or the single word: none
 
-AMBIGUITY CHECK: Before drawing the graph, check the answers under CLARIFICATIONS & ANSWERS against each other and against the requirement. An ambiguity is a combination of answers that cannot all be true or that leaves a decision undecided (for example "rollback within 30 days only" and "full version control with rollback"). If the text contains earlier refine rounds after "Generated from raw requirement", the answers at the top are the latest; check only those. Under AMBIGUITIES list each conflict in one line naming both answers, or write "none".`,
+AMBIGUITY CHECK: Before drawing the graph, check the answers under CLARIFICATIONS & ANSWERS against each other and against the requirement. An ambiguity is a combination of answers that cannot all be true or that leaves a decision undecided (for example "rollback within 30 days only" and "full version control with rollback"). If the text contains earlier refine rounds after "Generated from raw requirement", the answers at the top are the latest; check only those. Under AMBIGUITIES list each conflict in one line naming both answers, or write "none". If there is no CLARIFICATIONS & ANSWERS section, or no answer starts with "Selected:", list instead the gaps in the requirement itself (a decision whose target is undefined, a loop with no exit or limit, steps that contradict each other), at most 10. Never comment on the formula, the output format or documents that were not given.`,
         },
     ]);
 
@@ -347,9 +349,14 @@ AMBIGUITY CHECK: Before drawing the graph, check the answers under CLARIFICATION
 
     // Compact ID format (START/N1/.../END) is the primary format; the older
     // free-text parser below only runs if Claude did not follow it.
-    const ambiguities = parseAmbiguities(fullText);
+    // With answered Q&A the section lists answer conflicts (they cap confidence); without
+    // answers it lists gaps in the requirement itself (shown only, no cap)
+    const { conflicts: ambiguities, gaps: requirementGaps } = splitFindings(parseAmbiguities(fullText), answeredCount > 0);
     if (ambiguities.length) {
       console.log(`⚠️ ${ambiguities.length} answer conflict(s) found:`, ambiguities);
+    }
+    if (requirementGaps.length) {
+      console.log(`ℹ️ ${requirementGaps.length} requirement gap(s) noted:`, requirementGaps);
     }
 
     const compact = parseCompactGraph(fullText);
@@ -703,6 +710,7 @@ ${confidenceData.reason}`,
       confidenceScore: confidenceData.score,
       confidenceReason: confidenceData.reason,
       ambiguities,
+      requirementGaps,
       // THREE-PATH METRICS: Show analysis path and breakdown
       analyzedScenarios: {
         analysisPath: analysispath,

@@ -4,10 +4,16 @@ import { requireUser } from "@/lib/require-user";
 import { mergeAnalyses, type MergeInputDocument } from "@/lib/merge-analyses";
 import { pruneUserHistory } from "@/lib/history-retention";
 import { buildGraphBreakdown } from "@/lib/graph-breakdown";
+import { matchSteps } from "@/lib/step-matching";
+import { compareDocuments } from "@/lib/merge-compare";
+import { combineDocumentDetails } from "@/lib/merge-details";
+
+export const maxDuration = 60;
 
 // Combines 2-3 requirement documents that were already analysed (and saved)
 // one by one, and saves the combined analysis as a new history entry.
-// No AI call here: the graphs are joined from what is stored, so it is fast.
+// The graphs are joined from what is stored; one small AI call per extra document
+// suggests steps that are worded differently but mean the same (checked by code).
 export async function POST(request: NextRequest) {
   try {
     const auth = await requireUser(request);
@@ -68,8 +74,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const merged = mergeAnalyses(docs);
+    const stepMatching = await matchSteps(docs);
+    const merged = mergeAnalyses(docs, stepMatching.aliases);
+    const comparison = compareDocuments(
+      docs.map((d) => d.title),
+      merged.edges,
+      merged.paths,
+      merged.origins
+    );
     const graphBreakdown = buildGraphBreakdown(merged.nodes, merged.edges, merged.paths);
+    // Each document's own way of analysis, confidence, reasoning and findings
+    const details = combineDocumentDetails(
+      ordered.map((row: any) => ({ title: row.title || "Untitled Requirement", data: row.complexity_results[0].analysis_data }))
+    );
+    const documentSummaries = merged.documents.map((d, i) => ({
+      ...d,
+      confidenceScore: details.documents[i].confidenceScore,
+      analysisMode: details.documents[i].analysisMode,
+    }));
 
     const title =
       typeof body.title === "string" && body.title.trim()
@@ -88,11 +110,22 @@ export async function POST(request: NextRequest) {
       `The documents were analysed one by one, then their control-flow graphs were joined.`,
       `Start and End are shared. Steps with the same name in more than one document are counted once` +
         (merged.sharedSteps.length ? ` (${merged.sharedSteps.length} shared: ${merged.sharedSteps.join(", ")}).` : ` (none found).`),
+      stepMatching.matches.length
+        ? `${stepMatching.matches.length} differently worded step(s) were matched as the same step: ${stepMatching.matches
+            .map((m) => `"${m.step}" = "${m.matchedStep}"`)
+            .join("; ")}.`
+        : stepMatching.failed
+          ? `Step matching was not available, so only exact step names were matched.`
+          : `No differently worded steps were matched.`,
       `Repeated edges and paths are counted once.`,
       ``,
       breakdown,
       ``,
       `Combined: ${merged.calculation}`,
+      ``,
+      `How each document was analysed:`,
+      ``,
+      details.reasoningSection,
     ].join("\n");
 
     const { data: requirement, error: reqError } = await supabaseServer
@@ -104,10 +137,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Failed to save the combined analysis", details: reqError?.message }, { status: 500 });
     }
 
-    const confidences = ordered
-      .map((row: any) => Number(row.complexity_results[0].analysis_data?.confidenceScore))
-      .filter((v) => Number.isFinite(v) && v > 0);
-    const confidenceScore = confidences.length ? Math.min(...confidences) : 75;
+    const confidenceScore = details.confidenceScore;
 
     const { data: result, error: resultError } = await supabaseServer
       .from("complexity_results")
@@ -127,9 +157,15 @@ export async function POST(request: NextRequest) {
           analysis: analysisText,
           reasoning,
           confidenceScore,
-          confidenceReason: `Lowest confidence of the ${docs.length} combined documents`,
-          mergedFrom: merged.documents,
+          confidenceReason: details.confidenceReason,
+          ...(details.analysisMode ? { analysisMode: details.analysisMode } : {}),
+          ambiguities: details.ambiguities,
+          requirementGaps: details.requirementGaps,
+          mergedFrom: documentSummaries,
           sharedSteps: merged.sharedSteps,
+          origins: merged.origins,
+          stepMatches: stepMatching.matches,
+          comparison,
         },
       })
       .select()
@@ -158,9 +194,16 @@ export async function POST(request: NextRequest) {
         edges: merged.edges,
         pathsList: merged.paths,
         sharedSteps: merged.sharedSteps,
-        documents: merged.documents,
+        documents: documentSummaries,
+        origins: merged.origins,
+        stepMatches: stepMatching.matches,
+        comparison,
         reasoning,
         confidenceScore,
+        confidenceReason: details.confidenceReason,
+        analysisMode: details.analysisMode,
+        requirementGaps: details.requirementGaps,
+        ambiguities: details.ambiguities,
       },
     });
   } catch (error) {

@@ -49,3 +49,46 @@ export function ambiguityNotes(ambiguities: unknown): string[] {
     .filter(Boolean)
     .map((a) => `Answer conflict: ${a}`);
 }
+
+// Remarks about the prompt itself rather than the requirement (the formula convention,
+// a missing Q&A section, other documents, the output format). These are never findings.
+export function isMetaRemark(line: string): boolean {
+  return /CLARIFICATIONS|formula|M\s*=\s*E|connected components|McCabe|not provided|output format|plain[- ]text|graphical output/i.test(
+    String(line ?? "")
+  );
+}
+
+// The AMBIGUITIES section means two different things:
+// - with answered Q&A: answers that cannot all be true (these cap confidence);
+// - without answers: gaps in the requirement itself (shown, but they don't cap confidence).
+export function splitFindings(items: string[], hasAnswers: boolean): { conflicts: string[]; gaps: string[] } {
+  const findings = items.filter((line) => !isMetaRemark(line));
+  return hasAnswers ? { conflicts: findings, gaps: [] } : { conflicts: [], gaps: findings };
+}
+
+export function gapNotes(gaps: unknown): string[] {
+  return (Array.isArray(gaps) ? gaps : [])
+    .map((g) => String(g).trim())
+    .filter(Boolean)
+    .map((g) => `Requirement gap: ${g}`);
+}
+
+// Notes for the "Checks" list from a stored analysis. Analyses saved before gaps were
+// split out stored them as ambiguities; in direct mode those are shown as gaps.
+type StoredFindings = { ambiguities?: unknown; requirementGaps?: unknown; analysisMode?: unknown } | null | undefined;
+
+// Answer conflicts and requirement gaps of a stored analysis
+export function findingsOf(data: StoredFindings): { conflicts: string[]; gaps: string[] } {
+  const list = (v: unknown) => (Array.isArray(v) ? v.map(String).filter((x) => !isMetaRemark(x)) : []);
+  const stored = list(data?.ambiguities);
+  const olderDirect = data?.analysisMode === "direct" && !Array.isArray(data?.requirementGaps);
+  return {
+    conflicts: olderDirect ? [] : stored,
+    gaps: [...list(data?.requirementGaps), ...(olderDirect ? stored : [])],
+  };
+}
+
+export function findingNotes(data: StoredFindings): string[] {
+  const { conflicts, gaps } = findingsOf(data);
+  return [...ambiguityNotes(conflicts), ...gapNotes(gaps)];
+}

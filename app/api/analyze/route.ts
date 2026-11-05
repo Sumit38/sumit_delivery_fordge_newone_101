@@ -227,6 +227,7 @@ export async function POST(request: NextRequest) {
       confidenceScore: analysis.confidenceScore || 75,
       confidenceReason: analysis.confidenceReason || "Analysis complete",
       ambiguities: Array.isArray(analysis.ambiguities) ? analysis.ambiguities : [],
+      requirementGaps: Array.isArray(analysis.requirementGaps) ? analysis.requirementGaps : [],
       analyzedScenarios: analysis.analyzedScenarios || undefined,
     };
 
@@ -281,6 +282,7 @@ export async function POST(request: NextRequest) {
             confidenceScore: sanitizedAnalysis.confidenceScore,
             confidenceReason: sanitizedAnalysis.confidenceReason,
             ambiguities: sanitizedAnalysis.ambiguities,
+            requirementGaps: sanitizedAnalysis.requirementGaps,
             analysisMode: (sanitizedAnalysis.analyzedScenarios as any)?.analysisPath || "direct",
           },
         })
@@ -363,6 +365,7 @@ export async function POST(request: NextRequest) {
         decisionPoints: sanitizedAnalysis.decisionPoints,
         breakdown: sanitizedAnalysis.breakdown,
         ambiguities: sanitizedAnalysis.ambiguities,
+        requirementGaps: sanitizedAnalysis.requirementGaps,
         analysis: sanitizedAnalysis.analysis,
         reasoning: sanitizedAnalysis.reasoning,
         confidenceScore: sanitizedAnalysis.confidenceScore,

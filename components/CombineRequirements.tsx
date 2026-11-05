@@ -3,7 +3,17 @@
 import { useEffect, useRef, useState } from "react";
 import { authFetch } from "@/lib/auth-fetch";
 import { readRequirementFile, REQUIREMENT_FILE_ACCEPT, REQUIREMENT_FILE_LABEL } from "@/lib/read-requirement-file";
-import { buildFlowMermaid, buildPathTreeMermaid, downloadFlowDiagram, renderSvg } from "@/lib/flow-diagram";
+import {
+  buildFlowMermaid,
+  buildPathTreeMermaid,
+  downloadFlowDiagram,
+  filterToDocument,
+  renderSvg,
+  REGION_COLORS,
+  SHARED_COLOR,
+} from "@/lib/flow-diagram";
+import type { MergeOrigins } from "@/lib/merge-analyses";
+import type { DocumentComparison } from "@/lib/merge-compare";
 import InfoTip from "@/components/InfoTip";
 import { OverLimitWarning, UploadLimitsNote } from "@/components/UploadLimitsNote";
 
@@ -35,12 +45,22 @@ interface CombinedResult {
     edges: Array<{ from: string; to: string; condition?: string }>;
     pathsList: string[][];
     sharedSteps: string[];
-    documents: Array<{ title: string; n: number; e: number; p: number; m: number }>;
+    documents: Array<{ title: string; n: number; e: number; p: number; m: number; confidenceScore?: number | null; analysisMode?: string | null }>;
+    confidenceScore?: number;
+    confidenceReason?: string;
+    analysisMode?: string | null;
+    requirementGaps?: string[];
+    ambiguities?: string[];
+    origins?: MergeOrigins;
+    comparison?: DocumentComparison;
+    stepMatches?: Array<{ doc: number; step: string; matchedDoc: number; matchedStep: string }>;
   };
 }
 
 const MIN_TEXT = 50;
 const emptySlot = (): DocSlot => ({ title: "", text: "", fileName: "", status: "idle", message: "" });
+
+const modeName = (m?: string | null) => (m ? m.charAt(0).toUpperCase() + m.slice(1) : "-");
 
 const levelOf = (m: number) => (m <= 5 ? "Low" : m <= 15 ? "Medium" : m <= 30 ? "High" : "Very High");
 
@@ -57,6 +77,8 @@ export default function CombineRequirements({ onOpenHistory }: Props) {
   const [diagramSvg, setDiagramSvg] = useState("");
   const [diagramError, setDiagramError] = useState("");
   const [downloading, setDownloading] = useState<"" | "json" | "diagram">("");
+  // Region view of the combined graph: -1 = all documents, otherwise one document
+  const [view, setView] = useState(-1);
   const renderCount = useRef(0);
 
   const updateSlot = (index: number, patch: Partial<DocSlot>) =>
@@ -118,6 +140,7 @@ export default function CombineRequirements({ onOpenHistory }: Props) {
     setResult(null);
     setDiagramSvg("");
     setDiagramError("");
+    setView(-1);
 
     // Analyse every document at the same time; each one is its own request
     const outcomes = await Promise.allSettled(slots.map((slot, i) => analyzeOne(slot, i)));
@@ -155,14 +178,18 @@ export default function CombineRequirements({ onOpenHistory }: Props) {
     if (!result) return;
     let cancelled = false;
     renderCount.current += 1;
-    const code = buildFlowMermaid(result.analysis.nodes, result.analysis.edges);
+    setDiagramSvg("");
+    setDiagramError("");
+    const { nodes, edges, origins } = result.analysis;
+    const shown = origins && view >= 0 ? filterToDocument(nodes, edges, origins, view) : { nodes, edges, origins };
+    const code = buildFlowMermaid(shown.nodes, shown.edges, shown.origins);
     renderSvg(code, `combined-flow-${Date.now()}-${renderCount.current}`)
       .then((svg) => !cancelled && setDiagramSvg(svg))
       .catch((err) => !cancelled && setDiagramError(err instanceof Error ? err.message : "Could not draw the graph"));
     return () => {
       cancelled = true;
     };
-  }, [result]);
+  }, [result, view]);
 
   const fetchDetails = async (requirementId: string) => {
     const response = await authFetch(`/api/get-analysis-details?requirementId=${requirementId}`);
@@ -178,8 +205,8 @@ export default function CombineRequirements({ onOpenHistory }: Props) {
     try {
       const details = await fetchDetails(result.requirementId);
       details.flowDiagram = {
-        mermaid: buildFlowMermaid(details.metrics?.nodes || [], details.metrics?.edges || []),
-        pathTreeMermaid: buildPathTreeMermaid(details.metrics?.paths || []),
+        mermaid: buildFlowMermaid(details.metrics?.nodes || [], details.metrics?.edges || [], details.merge?.origins),
+        pathTreeMermaid: buildPathTreeMermaid(details.metrics?.paths || [], { regions: details.merge?.origins?.paths, maxNodes: 3000 }),
         howToView: "Paste the mermaid text into https://mermaid.live to view the diagram",
       };
       const blob = new Blob([JSON.stringify(details, null, 2)], { type: "application/json" });
@@ -215,6 +242,7 @@ export default function CombineRequirements({ onOpenHistory }: Props) {
     setError("");
     setDiagramSvg("");
     setDiagramError("");
+    setView(-1);
   };
 
   const statusText = (slot: DocSlot) => {
@@ -387,6 +415,8 @@ export default function CombineRequirements({ onOpenHistory }: Props) {
                   <th className="p-2">E</th>
                   <th className="p-2">P</th>
                   <th className="p-2">M (own)</th>
+                  <th className="p-2">Way of analysis</th>
+                  <th className="p-2">Confidence</th>
                 </tr>
               </thead>
               <tbody>
@@ -397,6 +427,8 @@ export default function CombineRequirements({ onOpenHistory }: Props) {
                     <td className="p-2 text-center">{doc.e}</td>
                     <td className="p-2 text-center">{doc.p}</td>
                     <td className="p-2 text-center">{doc.m}</td>
+                    <td className="p-2 text-center">{modeName(doc.analysisMode)}</td>
+                    <td className="p-2 text-center">{doc.confidenceScore != null ? `${doc.confidenceScore}%` : "-"}</td>
                   </tr>
                 ))}
                 <tr className="font-semibold bg-blue-50">
@@ -405,10 +437,40 @@ export default function CombineRequirements({ onOpenHistory }: Props) {
                   <td className="p-2 text-center">{result.analysis.edgesCount}</td>
                   <td className="p-2 text-center">{result.analysis.paths}</td>
                   <td className="p-2 text-center">{result.analysis.complexityScore}</td>
+                  <td className="p-2 text-center">{modeName(result.analysis.analysisMode)}</td>
+                  <td className="p-2 text-center">
+                    {result.analysis.confidenceScore != null ? `${result.analysis.confidenceScore}%` : "-"}
+                  </td>
                 </tr>
               </tbody>
             </table>
           </div>
+
+          {result.analysis.confidenceReason && (
+            <details className="text-sm">
+              <summary className="cursor-pointer text-blue-700">
+                Why the confidence is {result.analysis.confidenceScore}%
+              </summary>
+              <pre className="mt-1 whitespace-pre-wrap font-sans text-slate-700">{result.analysis.confidenceReason}</pre>
+            </details>
+          )}
+
+          {(result.analysis.ambiguities?.length || 0) + (result.analysis.requirementGaps?.length || 0) > 0 && (
+            <details className="text-sm p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <summary className="cursor-pointer font-medium text-amber-900">
+                Checks: {result.analysis.ambiguities?.length || 0} answer conflict(s), {result.analysis.requirementGaps?.length || 0}{" "}
+                requirement gap(s)
+              </summary>
+              <ul className="list-disc pl-6 mt-1 text-amber-900 space-y-0.5">
+                {(result.analysis.ambiguities || []).map((a, i) => (
+                  <li key={`a${i}`}>Answer conflict: {a}</li>
+                ))}
+                {(result.analysis.requirementGaps || []).map((g, i) => (
+                  <li key={`g${i}`}>Requirement gap: {g}</li>
+                ))}
+              </ul>
+            </details>
+          )}
 
           <p className="text-sm text-slate-700">
             {result.analysis.sharedSteps.length
@@ -416,8 +478,35 @@ export default function CombineRequirements({ onOpenHistory }: Props) {
               : "No step names matched across the documents, so only Start and End are shared."}
           </p>
 
+          {result.analysis.comparison && <ComparisonPanel result={result} />}
+
           <div>
             <h4 className="font-semibold text-slate-900 mb-2">Combined control-flow graph</h4>
+            {result.analysis.origins && (
+              <div className="mb-2 space-y-2">
+                <div className="flex gap-2 flex-wrap">
+                  {[-1, ...result.analysis.documents.map((_, i) => i)].map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setView(v)}
+                      className={`px-3 py-1 text-xs rounded border font-medium ${
+                        view === v ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+                      }`}
+                    >
+                      {v < 0 ? "All documents" : `Only ${result.analysis.documents[v].title}`}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-4 flex-wrap text-xs text-slate-600">
+                  <Swatch color={SHARED_COLOR} label="In more than one document" />
+                  {result.analysis.documents.map((d, i) =>
+                    REGION_COLORS[i] ? <Swatch key={i} color={REGION_COLORS[i]} label={`Only in ${d.title}`} /> : null
+                  )}
+                  <span>Diamond = decision point</span>
+                </div>
+              </div>
+            )}
             <div className="border border-slate-200 rounded-lg p-3 overflow-auto max-h-[600px] bg-white">
               {diagramSvg ? (
                 <div dangerouslySetInnerHTML={{ __html: diagramSvg }} />
@@ -466,6 +555,123 @@ export default function CombineRequirements({ onOpenHistory }: Props) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function Swatch({ color, label }: { color: { fill: string; stroke: string }; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <i className="inline-block w-3 h-3 rounded-sm" style={{ background: color.fill, border: `1px solid ${color.stroke}` }} />
+      {label}
+    </span>
+  );
+}
+
+// Common vs different: identical paths, steps only one document has, where similar
+// paths split, and shared decisions whose outcomes differ.
+function ComparisonPanel({ result }: { result: CombinedResult }) {
+  const c = result.analysis.comparison!;
+  const title = (i: number) => c.docTitles[i] || `Document ${i + 1}`;
+  const matches = result.analysis.stepMatches || [];
+  return (
+    <div className="space-y-4">
+      <h4 className="font-semibold text-slate-900">Common and different paths</h4>
+      <p className="text-sm text-slate-700">
+        <b>Common paths (same route in more than one document):</b>{" "}
+        {c.commonPaths.length ? c.commonPaths.join(", ") : "none. Each document's paths differ somewhere; the table below shows where."}
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {c.onlySteps.map((o) => (
+          <div key={o.doc} className="p-3 rounded-lg border text-sm" style={{ borderColor: REGION_COLORS[o.doc]?.stroke, background: REGION_COLORS[o.doc]?.fill }}>
+            <p className="font-semibold">Only in {title(o.doc)} ({o.steps.length})</p>
+            <p className="text-slate-700 mt-1">{o.steps.length ? o.steps.join(", ") : "none"}</p>
+          </div>
+        ))}
+      </div>
+      {matches.length > 0 && (
+        <details className="text-sm">
+          <summary className="cursor-pointer text-blue-700">Steps worded differently but matched as the same step ({matches.length})</summary>
+          <ul className="list-disc pl-6 mt-1 text-slate-700">
+            {matches.map((m, i) => (
+              <li key={i}>
+                &ldquo;{m.step}&rdquo; ({title(m.doc)}) = &ldquo;{m.matchedStep}&rdquo; ({title(m.matchedDoc)})
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      <div className="overflow-x-auto">
+        <p className="text-sm font-medium text-slate-800 mb-1">Where each path differs from the closest path in the other document</p>
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="bg-slate-800 text-white">
+              <th className="p-2 text-left">Path</th>
+              <th className="p-2 text-left">Closest path</th>
+              <th className="p-2">Shared steps</th>
+              <th className="p-2 text-left">Where they differ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {c.paths.length === 0 && (
+              <tr>
+                <td colSpan={4} className="p-2 text-slate-500">Every path is common.</td>
+              </tr>
+            )}
+            {c.paths.map((r, i) => (
+              <tr key={i} className="border-b border-slate-200 align-top">
+                <td className="p-2 whitespace-nowrap">{r.path} ({title(r.doc)})</td>
+                <td className="p-2 whitespace-nowrap">{r.closestPath ? `${r.closestPath} (${title(r.otherDoc)})` : "none"}</td>
+                <td className="p-2 text-center">{r.sharedSteps} of {r.steps}</td>
+                <td className="p-2">
+                  {r.differences.length === 0 ? (
+                    "Same steps in the same order"
+                  ) : (
+                    <ol className="list-decimal pl-5 space-y-1">
+                      {r.differences.map((d, k) => (
+                        <li key={k}>
+                          After <b>{d.after}</b>: {title(r.doc)} → {d.thisSteps.join(", ") || "(goes straight on)"}; {title(r.otherDoc)} →{" "}
+                          {d.otherSteps.join(", ") || "(goes straight on)"}; back together at <b>{d.rejoin}</b>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="overflow-x-auto">
+        <p className="text-sm font-medium text-slate-800 mb-1">Shared decisions with different outcomes</p>
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="bg-slate-800 text-white">
+              <th className="p-2 text-left">Decision</th>
+              <th className="p-2 text-left">Outcomes per document</th>
+            </tr>
+          </thead>
+          <tbody>
+            {c.decisions.length === 0 && (
+              <tr>
+                <td colSpan={2} className="p-2 text-slate-500">None: shared decisions lead to the same steps.</td>
+              </tr>
+            )}
+            {c.decisions.map((d, i) => (
+              <tr key={i} className="border-b border-slate-200 align-top">
+                <td className="p-2">{d.step}</td>
+                <td className="p-2">
+                  {d.outcomes.map((o) => (
+                    <div key={o.doc}>
+                      <b>{title(o.doc)}:</b> {o.outcomes.join("; ")}
+                    </div>
+                  ))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
