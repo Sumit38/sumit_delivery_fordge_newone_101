@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const client = new Anthropic();
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY });
 
     const prompt = `You are a business analyst expert. Analyze the following requirement and generate a structured use case document in JSON format.
 

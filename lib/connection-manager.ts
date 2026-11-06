@@ -26,7 +26,7 @@ export function getAnthropicClient(): Anthropic {
   if (!anthropicInstance) {
     console.log("✅ CONNECTION: Creating new Anthropic client instance");
     anthropicInstance = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY,
+      apiKey: process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY,
     });
   }
 

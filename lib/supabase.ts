@@ -10,10 +10,10 @@ function getDummyClient() {
       signUp: async () => ({ data: null, error: new Error('Auth unavailable') }),
       signOut: async () => ({ error: null }),
     },
-    from: (table: string) => ({
-      select: (cols?: string) => ({
-        eq: (col: string, val: any) => ({
-          eq: (col2: string, val2: any) => ({
+    from: (_table: string) => ({
+      select: (_cols?: string) => ({
+        eq: (_col: string, _val: any) => ({
+          eq: (_col2: string, _val2: any) => ({
             single: async () => ({ data: null, error: null }),
           }),
           single: async () => ({ data: null, error: null }),

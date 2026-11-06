@@ -3,7 +3,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { PathScenario } from "./path-scenarios";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY });
 
 // Paths per wording request; batches run in parallel so large analyses stay within the time limit
 export const PATHS_PER_BATCH = 3;

@@ -6,7 +6,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { stepKey } from "./merge-analyses";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY });
 const MATCH_TIMEOUT_MS = 20_000;
 
 export interface StepMatch {

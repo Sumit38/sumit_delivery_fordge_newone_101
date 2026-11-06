@@ -31,7 +31,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let { requirementText, title, questionsMetadata } = body;
+    const title = body.title;
+    let { requirementText, questionsMetadata } = body;
 
     if (!requirementText || typeof requirementText !== "string") {
       console.error("❌ [2/5] Missing or invalid requirementText");

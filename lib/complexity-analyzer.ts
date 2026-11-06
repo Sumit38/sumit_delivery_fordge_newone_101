@@ -3,7 +3,7 @@ import { buildGraphBreakdown, completeBranchCoverage } from "./graph-breakdown";
 import { AMBIGUOUS_CONFIDENCE_CAP, analysisMode, countAnswersInText, parseAmbiguities, splitFindings } from "./qa-status";
 
 const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
+  apiKey: process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY,
 });
 
 // The complexity analysis (graph design) runs on Opus for accuracy on complex

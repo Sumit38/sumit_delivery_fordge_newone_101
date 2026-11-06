@@ -12,7 +12,7 @@ import {
 export const maxDuration = 60;
 
 const anthropic = new Anthropic({
-  apiKey: process.env.CLAUDE_API_KEY,
+  apiKey: process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY,
 });
 
 const STORY_TYPES = ["Functional", "Non-functional", "Technical", "Spike", "Integration", "Reporting"];
