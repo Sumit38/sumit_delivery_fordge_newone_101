@@ -2,7 +2,7 @@
 // the same pointers as a single analysis: way of analysis, confidence and its reason,
 // the reasoning, answer conflicts and requirement gaps. Pure code, no AI.
 
-import { findingsOf } from "./qa-status";
+import { clampConfidence, findingsOf } from "./qa-status";
 
 type Mode = "guided" | "hybrid" | "direct";
 const MODE_ORDER: Mode[] = ["direct", "hybrid", "guided"];
@@ -45,7 +45,7 @@ export function combineDocumentDetails(sources: SourceDocument[]): CombinedDetai
     return {
       title,
       analysisMode: mode,
-      confidenceScore: Number.isFinite(score) && score > 0 ? score : null,
+      confidenceScore: Number.isFinite(score) && score > 0 ? clampConfidence(score) : null,
       confidenceReason: String(data?.confidenceReason || "").trim(),
       reasoning: String(data?.reasoning || "").trim(),
     };

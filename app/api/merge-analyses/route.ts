@@ -8,7 +8,7 @@ import { matchSteps } from "@/lib/step-matching";
 import { compareDocuments } from "@/lib/merge-compare";
 import { combineDocumentDetails } from "@/lib/merge-details";
 
-export const maxDuration = 60;
+export const maxDuration = 120; // Vercel Hobby with Fluid compute allows up to 300 s
 
 // Combines 2-3 requirement documents that were already analysed (and saved)
 // one by one, and saves the combined analysis as a new history entry.

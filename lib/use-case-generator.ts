@@ -121,36 +121,36 @@ function buildFieldValidationHtml(useCaseQA: UseCaseQA): string {
 
 export function buildUseCaseHTML(useCaseTitle: string, useCaseQA: UseCaseQA | null): string {
   const actorsHtml = useCaseQA
-    ? useCaseQA.actors
+    ? (useCaseQA.actors || [])
         .map((actor) => `<li><strong>${actor.name}:</strong> ${actor.role}</li>`)
         .join("")
     : "";
 
   const preconditionsHtml = useCaseQA
-    ? useCaseQA.preconditions.map((pc) => `<li>${pc}</li>`).join("")
+    ? (useCaseQA.preconditions || []).map((pc) => `<li>${pc}</li>`).join("")
     : "";
 
   const mainFlowHtml = useCaseQA
-    ? useCaseQA.mainFlow
+    ? (useCaseQA.mainFlow || [])
         .map((step) => `<li><strong>${step.actor}:</strong> ${step.action}</li>`)
         .join("")
     : "";
 
   const alternativeFlowsHtml = useCaseQA
-    ? useCaseQA.alternativeFlows
+    ? (useCaseQA.alternativeFlows || [])
         .map(
           (flow) =>
             `<h3>${flow.name}</h3>
       <p><strong>Trigger:</strong> ${flow.trigger}</p>
       <ol>
-        ${flow.steps.map((step) => `<li><strong>${step.actor}:</strong> ${step.action}</li>`).join("")}
+        ${(flow.steps || []).map((step) => `<li><strong>${step.actor}:</strong> ${step.action}</li>`).join("")}
       </ol>`
         )
         .join("")
     : "";
 
   const exceptionFlowsHtml = useCaseQA
-    ? useCaseQA.exceptionFlows
+    ? (useCaseQA.exceptionFlows || [])
         .map(
           (exception) =>
             `<div class="step">
@@ -163,11 +163,11 @@ export function buildUseCaseHTML(useCaseTitle: string, useCaseQA: UseCaseQA | nu
     : "";
 
   const postconditionsHtml = useCaseQA
-    ? useCaseQA.postconditions.map((pc) => `<li>${pc}</li>`).join("")
+    ? (useCaseQA.postconditions || []).map((pc) => `<li>${pc}</li>`).join("")
     : "";
 
   const kpisHtml = useCaseQA
-    ? useCaseQA.kpis
+    ? (useCaseQA.kpis || [])
         .map(
           (kpi) =>
             `<tr>
@@ -364,7 +364,7 @@ export function buildUseCaseHTML(useCaseTitle: string, useCaseQA: UseCaseQA | nu
 
           <div class="section">
             <h2>8. Business Value</h2>
-            <p>${useCaseQA.businessValue}</p>
+            <p>${useCaseQA.businessValue || ""}</p>
           </div>
 
           <div class="section">
@@ -409,23 +409,34 @@ export async function generateUseCasePDF(data: UseCaseData): Promise<void> {
   const cacheKey = `usecase_${data.analysisId || data.requirementTitle}`;
   sessionStorage.removeItem(cacheKey);
 
-  try {
-    const response = await authFetch("/api/generate-use-case-qa", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        requirementText: data.requirementText,
-        requirementTitle: data.requirementTitle,
-        analysisId: data.analysisId || data.requirementTitle,
-      }),
-    });
+  const response = await authFetch("/api/generate-use-case-qa", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      requirementText: data.requirementText,
+      requirementTitle: data.requirementTitle,
+      analysisId: data.analysisId || data.requirementTitle,
+    }),
+  });
 
-    if (response.ok) {
-      const result = await response.json();
-      useCaseQA = result.data;
+  // The server can answer with plain text (e.g. a hosting time-out), so read the body as text first
+  const raw = await response.text();
+  let result: any = null;
+  try {
+    result = JSON.parse(raw);
+  } catch {
+    result = null;
+  }
+  if (!response.ok || !result?.data) {
+    if (response.status === 504 || response.status === 408) {
+      throw new Error("Writing the use case took longer than the server allows. Please try again.");
     }
-  } catch (error) {
-    console.error("Error generating use case QA:", error);
+    throw new Error(result?.error || `Failed to generate the Use Case document (server error ${response.status}). Please try again.`);
+  }
+  // Never open an empty document: the flows are required
+  useCaseQA = result.data;
+  if (!useCaseQA || !Array.isArray(useCaseQA.mainFlow) || !useCaseQA.mainFlow.length) {
+    throw new Error("The use case came back empty. Please try again.");
   }
 
   const useCaseTitle = useCaseQA?.useCaseTitle || data.requirementTitle;

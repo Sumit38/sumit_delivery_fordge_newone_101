@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/require-user";
 import { checkRateLimit } from "@/lib/rate-limit";
 import Anthropic from "@anthropic-ai/sdk";
 
-export const maxDuration = 60;
+export const maxDuration = 120; // Vercel Hobby with Fluid compute allows up to 300 s
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY,

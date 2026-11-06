@@ -16,11 +16,14 @@ import type { MergeOrigins } from "@/lib/merge-analyses";
 import type { DocumentComparison } from "@/lib/merge-compare";
 import InfoTip from "@/components/InfoTip";
 import { OverLimitWarning, UploadLimitsNote } from "@/components/UploadLimitsNote";
+import CombineQuestionsModal from "@/components/CombineQuestionsModal";
+import { answerStatusFor, guidedTextFor, type CombineQuestion } from "@/lib/combine-questions";
 
 // Analyse 2-3 requirement documents and combine them into one complexity
 // score, one analysis file and one Mermaid graph. Each document is analysed
 // on its own first (and saved like a normal analysis), so every call stays
-// inside the 60-second limit; then the graphs are joined on the server.
+// inside the server time limit; then the graphs are joined on the server.
+// Guided path: 10 shared questions are answered first and sent with every document.
 
 interface DocSlot {
   title: string;
@@ -80,6 +83,14 @@ export default function CombineRequirements({ onOpenHistory }: Props) {
   // Region view of the combined graph: -1 = all documents, otherwise one document
   const [view, setView] = useState(-1);
   const renderCount = useRef(0);
+  // Direct = analyse the documents as they are; guided = answer shared questions first
+  const [pathMode, setPathMode] = useState<"direct" | "guided">("direct");
+  const [questions, setQuestions] = useState<CombineQuestion[] | null>(null);
+  // The documents the questions were written for; new questions are needed when they change
+  const [questionsKey, setQuestionsKey] = useState("");
+  const [preparing, setPreparing] = useState(false);
+  const [showQuestions, setShowQuestions] = useState(false);
+  const docsKey = JSON.stringify(slots.map((s) => [s.title.trim(), s.text.trim()]));
 
   const updateSlot = (index: number, patch: Partial<DocSlot>) =>
     setSlots((prev) => prev.map((slot, i) => (i === index ? { ...slot, ...patch } : slot)));
@@ -110,16 +121,20 @@ export default function CombineRequirements({ onOpenHistory }: Props) {
     }
   };
 
-  const canRun = !running && slots.every((slot) => slot.text.trim().length >= MIN_TEXT);
+  const canRun = !running && !preparing && slots.every((slot) => slot.text.trim().length >= MIN_TEXT);
 
-  const analyzeOne = async (slot: DocSlot, index: number): Promise<string> => {
+  const analyzeOne = async (slot: DocSlot, index: number, guided: CombineQuestion[] | null): Promise<string> => {
     updateSlot(index, { status: "analyzing", message: "Analysing..." });
+    const title = slot.title.trim() || `Document ${index + 1}`;
+    // Guided path: the shared answers go with the document, same as a single guided analysis
+    const metadata = guided ? answerStatusFor(index, guided) : [];
     const response = await authFetch("/api/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        requirementText: slot.text,
-        title: slot.title.trim() || `Document ${index + 1}`,
+        requirementText: guided ? guidedTextFor(index, title, slot.text, guided) : slot.text,
+        title,
+        ...(metadata.length ? { questionsMetadata: metadata } : {}),
       }),
     });
     const data = await response.json().catch(() => ({}));
@@ -134,7 +149,50 @@ export default function CombineRequirements({ onOpenHistory }: Props) {
     return String(data.requirementId);
   };
 
-  const handleRun = async () => {
+  // Guided path: write (or reuse) the shared questions, then let the user answer them
+  const prepareQuestions = async () => {
+    setError("");
+    if (questions && questionsKey === docsKey) {
+      setShowQuestions(true);
+      return;
+    }
+    setPreparing(true);
+    try {
+      const response = await authFetch("/api/combine-questions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          documents: slots.map((s, i) => ({ title: s.title.trim() || `Document ${i + 1}`, text: s.text })),
+        }),
+      });
+      const raw = await response.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        data = null;
+      }
+      if (!response.ok || !Array.isArray(data?.questions) || !data.questions.length) {
+        if (response.status === 504) throw new Error("Preparing the questions took longer than the server allows. Please try again.");
+        throw new Error(data?.error || "Could not prepare the guided questions. Please try again, or use the direct path.");
+      }
+      setQuestions(data.questions);
+      setQuestionsKey(docsKey);
+      setShowQuestions(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not prepare the guided questions.");
+    } finally {
+      setPreparing(false);
+    }
+  };
+
+  const handleRun = () => {
+    if (pathMode === "guided") prepareQuestions();
+    else runAnalysis(null);
+  };
+
+  const runAnalysis = async (guided: CombineQuestion[] | null) => {
+    setShowQuestions(false);
     setRunning(true);
     setError("");
     setResult(null);
@@ -143,7 +201,7 @@ export default function CombineRequirements({ onOpenHistory }: Props) {
     setView(-1);
 
     // Analyse every document at the same time; each one is its own request
-    const outcomes = await Promise.allSettled(slots.map((slot, i) => analyzeOne(slot, i)));
+    const outcomes = await Promise.allSettled(slots.map((slot, i) => analyzeOne(slot, i, guided)));
     outcomes.forEach((outcome, i) => {
       if (outcome.status === "rejected") {
         updateSlot(i, { status: "error", message: outcome.reason?.message || "Analysis failed" });
@@ -243,6 +301,9 @@ export default function CombineRequirements({ onOpenHistory }: Props) {
     setDiagramSvg("");
     setDiagramError("");
     setView(-1);
+    setQuestions(null);
+    setQuestionsKey("");
+    setShowQuestions(false);
   };
 
   const statusText = (slot: DocSlot) => {
@@ -359,6 +420,49 @@ export default function CombineRequirements({ onOpenHistory }: Props) {
           />
         </div>
 
+        <fieldset className="mt-5" disabled={running || preparing}>
+          <legend className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
+            Would you like to analyse the requirements on the Direct path or the Guided path?
+            <InfoTip
+              note={{
+                title: "Direct path vs Guided path",
+                lines: [
+                  "Direct path: each document is analysed as it is. No questions are asked.",
+                  "Guided path: the AI reads all the documents together and asks 10 clarifying questions (unclear decisions, loops, steps that differ between the documents).",
+                  "Each answer is used for every document it applies to, so the documents are analysed with the same assumptions and their scores stay comparable.",
+                  "Answer all 10 for a Guided analysis; if some are left blank their suggested answer is used and the analysis counts as Hybrid.",
+                ],
+              }}
+            />
+          </legend>
+          <div className="flex gap-3 flex-wrap">
+            {(
+              [
+                ["direct", "Direct path", "No questions; analyse the documents as they are"],
+                ["guided", "Guided path", "Answer 10 questions first for a more accurate, consistent analysis"],
+              ] as const
+            ).map(([value, label, hint]) => (
+              <label
+                key={value}
+                className={`flex-1 min-w-[220px] cursor-pointer rounded-lg border p-3 ${pathMode === value ? "border-blue-500 bg-blue-50" : "border-slate-300 bg-white hover:bg-slate-50"}`}
+              >
+                <span className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="combine-path"
+                    value={value}
+                    checked={pathMode === value}
+                    onChange={() => setPathMode(value)}
+                    className="w-4 h-4"
+                  />
+                  <span className="text-sm font-semibold text-slate-900">{label}</span>
+                </span>
+                <span className="block text-xs text-slate-600 mt-1 ml-6">{hint}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+
         {error && <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>}
 
         <div className="mt-5 flex gap-3 flex-wrap">
@@ -368,7 +472,13 @@ export default function CombineRequirements({ onOpenHistory }: Props) {
             disabled={!canRun}
             className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed font-semibold"
           >
-            {running ? "Analysing documents..." : `Analyse & combine ${slots.length} documents`}
+            {running
+              ? "Analysing documents..."
+              : preparing
+                ? "Preparing 10 questions..."
+                : pathMode === "guided"
+                  ? `Answer 10 questions, then analyse ${slots.length} documents`
+                  : `Analyse & combine ${slots.length} documents`}
           </button>
           {(result || error) && !running && (
             <button type="button" onClick={reset} className="px-4 py-2.5 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50">
@@ -379,7 +489,20 @@ export default function CombineRequirements({ onOpenHistory }: Props) {
         {running && (
           <p className="text-xs text-slate-500 mt-2">Each document can take up to a minute. They run at the same time.</p>
         )}
+        {preparing && (
+          <p className="text-xs text-slate-500 mt-2">Reading all the documents together to write the questions. This usually takes 10–30 seconds.</p>
+        )}
       </div>
+
+      {showQuestions && questions && (
+        <CombineQuestionsModal
+          questions={questions}
+          docTitles={slots.map((s) => s.title)}
+          onChange={setQuestions}
+          onCancel={() => setShowQuestions(false)}
+          onConfirm={() => runAnalysis(questions)}
+        />
+      )}
 
       {result && (
         <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm space-y-5">

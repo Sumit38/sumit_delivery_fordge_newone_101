@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { buildGraphBreakdown, completeBranchCoverage } from "./graph-breakdown";
-import { AMBIGUOUS_CONFIDENCE_CAP, analysisMode, countAnswersInText, parseAmbiguities, splitFindings } from "./qa-status";
+import { analysisMode, clampConfidence, countAnswersInText, parseAmbiguities, splitFindings } from "./qa-status";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY,
@@ -107,7 +107,7 @@ export interface ComplexityAnalysis {
   confidenceReason?: string;
   // Answer combinations that cannot all be true (empty when the answers agree)
   ambiguities?: string[];
-  // Gaps in the requirement itself, found when no Q&A was answered (they don't cap confidence)
+  // Gaps in the requirement itself, found when no Q&A was answered (listed for review; they do not change confidence)
   requirementGaps?: string[];
   analyzedScenarios?: AnalyzedScenarios;
 }
@@ -349,7 +349,7 @@ AMBIGUITY CHECK: Before drawing the graph, check the answers under CLARIFICATION
 
     // Compact ID format (START/N1/.../END) is the primary format; the older
     // free-text parser below only runs if Claude did not follow it.
-    // With answered Q&A the section lists answer conflicts (they cap confidence); without
+    // With answered Q&A the section lists answer conflicts (listed for review); without
     // answers it lists gaps in the requirement itself (shown only, no cap)
     const { conflicts: ambiguities, gaps: requirementGaps } = splitFindings(parseAmbiguities(fullText), answeredCount > 0);
     if (ambiguities.length) {
@@ -625,15 +625,15 @@ AMBIGUITY CHECK: Before drawing the graph, check the answers under CLARIFICATION
       console.log(`\n📊 PATH 3 (DIRECT): ${wordCount} words, ${indicatorCount} indicators detected`);
     }
 
-    // Conflicting answers make the analysis ambiguous: the baseline is not final until they are resolved
+    // The score is shown as calculated (never above 100%). Answer conflicts are listed for
+    // review but do not lower it.
+    confidenceData = { ...confidenceData, score: clampConfidence(confidenceData.score) };
     if (ambiguities.length > 0) {
-      const capped = Math.min(confidenceData.score, AMBIGUOUS_CONFIDENCE_CAP);
       confidenceData = {
         ...confidenceData,
-        score: capped,
-        reason: `AMBIGUOUS: ${ambiguities.length} answer conflict(s) found - resolve them before treating this score as final (confidence capped at ${capped}%).
-${ambiguities.map((a) => `   - ${a}`).join("\n")}
-${confidenceData.reason}`,
+        reason: `${confidenceData.reason}
+Checks: ${ambiguities.length} answer conflict(s) found - please review them (they do not change the confidence score):
+${ambiguities.map((a) => `   - ${a}`).join("\n")}`,
       };
     }
 

@@ -110,12 +110,21 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
         }),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to generate user stories");
+      // The server can answer with plain text (e.g. a hosting time-out), so read the body as text first
+      const raw = await response.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        data = null;
       }
-
-      const data = await response.json();
+      if (!response.ok || !data) {
+        if (response.status === 504 || response.status === 408) {
+          throw new Error("Story generation took longer than the server allows. Please try again.");
+        }
+        throw new Error(data?.error || `Failed to generate user stories (server error ${response.status}). Please try again.`);
+      }
+      if (!Array.isArray(data.stories)) throw new Error("Failed to generate user stories. Please try again.");
       const nextSession = planned
         ? { planningAnswers: options.planningAnswers!, questionAnswers: options.questionAnswers || [] }
         : null;

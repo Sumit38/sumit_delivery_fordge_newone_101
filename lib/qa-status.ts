@@ -39,9 +39,13 @@ export function parseAmbiguities(text: string): string[] {
     .slice(0, 20);
 }
 
-// Confidence for an analysis whose answers conflict is capped: the baseline is not final
-// until the conflicts are resolved.
-export const AMBIGUOUS_CONFIDENCE_CAP = 50;
+// Confidence is shown as calculated, kept within 0-100%. Answer conflicts are listed
+// for review but do not lower it.
+export function clampConfidence(score: unknown): number {
+  const n = Number(score);
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(100, Math.max(0, Math.round(n)));
+}
 
 export function ambiguityNotes(ambiguities: unknown): string[] {
   return (Array.isArray(ambiguities) ? ambiguities : [])
@@ -59,8 +63,9 @@ export function isMetaRemark(line: string): boolean {
 }
 
 // The AMBIGUITIES section means two different things:
-// - with answered Q&A: answers that cannot all be true (these cap confidence);
-// - without answers: gaps in the requirement itself (shown, but they don't cap confidence).
+// - with answered Q&A: answers that cannot all be true (listed for review);
+// - without answers: gaps in the requirement itself (listed for review).
+// Neither changes the confidence score.
 export function splitFindings(items: string[], hasAnswers: boolean): { conflicts: string[]; gaps: string[] } {
   const findings = items.filter((line) => !isMetaRemark(line));
   return hasAnswers ? { conflicts: findings, gaps: [] } : { conflicts: [], gaps: findings };

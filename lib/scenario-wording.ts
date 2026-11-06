@@ -7,7 +7,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || proce
 
 // Paths per wording request; batches run in parallel so large analyses stay within the time limit
 export const PATHS_PER_BATCH = 3;
-const WORDING_TIMEOUT_MS = 40_000;
+const WORDING_TIMEOUT_MS = 100_000;
 
 export type ScenarioWording = {
   id?: unknown;

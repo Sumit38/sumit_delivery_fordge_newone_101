@@ -50,7 +50,7 @@ export default function DownloadUseCaseButton({
       });
     } catch (error) {
       console.error("Error generating PDF:", error);
-      alert("Failed to generate Use Case document");
+      alert(error instanceof Error && error.message ? error.message : "Failed to generate Use Case document");
     } finally {
       setIsGenerating(false);
     }

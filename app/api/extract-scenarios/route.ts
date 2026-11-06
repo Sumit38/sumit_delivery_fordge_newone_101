@@ -7,7 +7,7 @@ import { latestRound } from "@/lib/qa-status";
 import { applyWording, buildPathScenarios, checkScenarioCoverage, uniqueRoutes } from "@/lib/path-scenarios";
 import { writeScenarioWording } from "@/lib/scenario-wording";
 
-export const maxDuration = 60;
+export const maxDuration = 120; // Vercel Hobby with Fluid compute allows up to 300 s
 
 // Test scenarios are built from the analysis' stored paths: exactly one positive and one
 // negative scenario per path (2P). The AI only writes the wording for each one.
