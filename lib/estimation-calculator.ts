@@ -9,6 +9,7 @@ import {
   calculateComprehensive,
   countRoles,
   seniorityFactor,
+  type ArchitectureEstimateInput,
   type ComprehensiveDetails,
   type TeamAnswers,
   type TestingAnswers,
@@ -41,6 +42,7 @@ export interface EstimationResult {
 export interface EstimationContext {
   paths?: number;
   testScenarios?: number;
+  architecture?: ArchitectureEstimateInput;
 }
 
 export function calculateEstimation(
@@ -143,14 +145,18 @@ function calculateComprehensiveEstimation(
   const deadline = answers[7];
   const costPerHour = answers[8] || undefined;
 
-  const techFactor = getTechFactor(techFamiliarity);
-  const riskFactor = getRiskFactor(riskTolerance);
+  // On an approved architecture, familiarity is asked per technology and the risk tolerance is
+  // calculated from the design, so the single project-wide factors are not applied
+  const arch = context.architecture;
+  const techFactor = arch ? 1 : getTechFactor(techFamiliarity);
+  const riskFactor = arch ? 1 : getRiskFactor(riskTolerance);
   const deadlineFactor = getDeadlineFactor(deadline);
 
   const { totalEffort, timeline, devBase, details } = calculateComprehensive({
     complexityScore,
     paths: context.paths,
     testScenarios: context.testScenarios,
+    architecture: context.architecture,
     availability,
     techFactor,
     riskFactor,
@@ -181,6 +187,19 @@ function calculateComprehensiveEstimation(
   if (types.includes("Functional") && types.includes("Regression")) confidence += 5;
   for (const g of details.gaps) confidence -= g.severity === "high" ? 8 : g.severity === "medium" ? 4 : 0;
   confidence = Math.max(40, Math.min(95, confidence));
+  if (details.riskTolerance) confidence = details.riskTolerance.confidence;
+
+  const familiarityText = arch
+    ? Object.entries(
+        (details.architecture?.components || []).reduce<Record<string, string[]>>((acc, c) => {
+          (acc[c.familiarity || "Moderately Familiar"] ||= []).push(c.technology || c.name);
+          return acc;
+        }, {})
+      )
+        .map(([level, techs]) => `${level}: ${[...new Set(techs)].join(", ")}`)
+        .join("; ")
+    : techFamiliarity;
+  const riskText = details.riskTolerance ? `Calculated: −${details.riskTolerance.downPct}% / +${details.riskTolerance.upPct}%` : riskTolerance;
 
   const testingLevel = `Custom: ${types.length} test type${types.length === 1 ? "" : "s"}`;
   const roleSummary = devRoles.length
@@ -191,12 +210,16 @@ function calculateComprehensiveEstimation(
     : "none";
 
   const assumptions = [
-    `Project complexity score of ${complexityScore} used as baseline (M = E - N + 2P)`,
+    context.architecture
+      ? `Development sized from approved architecture v${context.architecture.version} (${context.architecture.sizing.components.length} components covering the analysis graph); complexity score ${complexityScore} (M = E - N + 2P) kept for reference`
+      : `Project complexity score of ${complexityScore} used as baseline (M = E - N + 2P)`,
     `Developers: ${developers} (${roleSummary}); testers: ${countRoles(testing.testers)}; support roles: ${countRoles(team.support)}`,
     `Work areas: ${(team.workstreams || []).join(", ") || "none selected"}`,
     `Test types: ${types.join(", ") || "none selected"}; approach: ${details.testApproach}`,
     `Availability: ${availability} hours per week per person`,
-    `Technology familiarity: ${techFamiliarity}; risk approach: ${riskTolerance}; deadline: ${deadline}`,
+    arch
+      ? `Technology familiarity per component technology (${familiarityText}); risk tolerance calculated from the design; deadline: ${deadline}`
+      : `Technology familiarity: ${techFamiliarity}; risk approach: ${riskTolerance}; deadline: ${deadline}`,
     ...details.formulas,
   ];
 
@@ -207,9 +230,9 @@ function calculateComprehensiveEstimation(
     teamSize: developers,
     costPerHour,
     totalBudget: costPerHour ? Math.round(totalEffort * costPerHour) : undefined,
-    riskLevel: riskTolerance,
+    riskLevel: riskText,
     skillLevel: skillLevel || "Mixed",
-    techFamiliarity,
+    techFamiliarity: arch ? "Per technology" : techFamiliarity,
     testingLevel,
     confidence,
     breakdown: { skillFactor, techFactor, testFactor, riskFactor, deadlineFactor, details },

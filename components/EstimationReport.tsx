@@ -265,6 +265,102 @@ export function DetailsSections({ details: d }: { details: ComprehensiveDetails 
 
   return (
     <>
+      {/* Basis: approved architecture and range */}
+      {d.architecture && (
+        <div className="bg-white border border-green-200 rounded-lg p-6">
+          <h3 className="text-xl font-bold text-gray-900 mb-1">🏗️ Basis: Approved Architecture v{d.architecture.version}</h3>
+          {d.range && !d.riskTolerance && (
+            <p className="text-sm text-gray-700 mb-3">
+              Likely total <strong>{d.range.likely} h</strong>, range <strong>{d.range.low}–{d.range.high} h</strong> ({d.range.rule}).
+            </p>
+          )}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border border-gray-200">
+              <thead className="bg-gray-50 text-gray-700">
+                <tr>
+                  <th className="p-2 text-left">Component</th>
+                  <th className="p-2 text-left">{d.architecture.basis === "tasks" ? "Technology · familiarity" : "Type"}</th>
+                  <th className="p-2 text-left">Process steps</th>
+                  {d.architecture.basis === "tasks" && <th className="p-2 text-right">Tasks (low–likely–high h)</th>}
+                  <th className="p-2 text-right">{d.architecture.basis === "tasks" ? "Hours used" : "Base hours"}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.architecture.components.map((c) => (
+                  <tr key={c.id} className="border-t border-gray-200">
+                    <td className="p-2">{c.name}</td>
+                    <td className="p-2 text-gray-600">
+                      {d.architecture!.basis === "tasks" ? `${c.technology || c.type} · ${c.familiarity || "Moderately Familiar"}` : c.type}
+                    </td>
+                    <td className="p-2 text-gray-600">{c.steps.join(", ") || "—"}</td>
+                    {d.architecture!.basis === "tasks" && (
+                      <td className="p-2 text-right text-gray-600">
+                        {c.tasks} · {c.low}–{c.likely}–{c.high}
+                      </td>
+                    )}
+                    <td className="p-2 text-right">{c.hours}</td>
+                  </tr>
+                ))}
+                {(d.architecture.unassignedHours || 0) > 0 && (
+                  <tr className="border-t border-gray-200 bg-amber-50">
+                    <td className="p-2" colSpan={3}>Steps not assigned to a component</td>
+                    <td className="p-2 text-right">{d.architecture.unassignedHours}</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            {d.architecture.basis === "tasks"
+              ? `Hours used = the component's likely task hours (${d.architecture.taskCount} tasks estimated on the architecture${d.architecture.edited ? ", some edited by you" : ""}) × technology familiarity (Very 0.9, Moderate 1.0, New 1.3). Seniority, defect fixing, testing and support roles are added below.${d.architecture.withoutTasks?.length ? ` Components without hours: ${d.architecture.withoutTasks.join(", ")}.` : ""}`
+              : `Base hours before technology, risk and seniority factors: ${d.architecture.totalPoints} graph points (1 per step + 1 per extra decision branch) of the steps each component delivers, weighted by component type, × ${d.architecture.hoursPerPoint} h.`}
+          </p>
+        </div>
+      )}
+
+      {/* Risk tolerance */}
+      {d.riskTolerance && (
+        <div className="bg-white border border-amber-200 rounded-lg p-6">
+          <h3 className="text-xl font-bold text-gray-900 mb-1">⚖️ Risk Tolerance: −{d.riskTolerance.downPct}% / +{d.riskTolerance.upPct}%</h3>
+          <p className="text-sm text-gray-700 mb-3">
+            Likely <strong>{d.riskTolerance.likely} h</strong>; the actual effort may range from <strong>{d.riskTolerance.low} h</strong> to{" "}
+            <strong>{d.riskTolerance.high} h</strong>. Hold back a contingency of <strong>{d.riskTolerance.contingencyHours} h</strong>. Calculated
+            from the approved architecture, not chosen; each contributor below can be reduced by acting on it now.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border border-gray-200">
+              <thead className="bg-gray-50 text-gray-700">
+                <tr>
+                  <th className="p-2 text-left">Contributor</th>
+                  <th className="p-2 text-left">Evidence</th>
+                  <th className="p-2 text-right">Lower</th>
+                  <th className="p-2 text-right">Higher</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.riskTolerance.contributors.map((c) => (
+                  <tr key={c.source} className="border-t border-gray-200">
+                    <td className="p-2 font-medium">{c.source}</td>
+                    <td className="p-2 text-gray-600">{c.detail}</td>
+                    <td className="p-2 text-right">{c.downPct ? `−${c.downPct}%` : "—"}</td>
+                    <td className="p-2 text-right">{c.upPct ? `+${c.upPct}%` : "—"}</td>
+                  </tr>
+                ))}
+                <tr className="border-t border-gray-300 font-semibold">
+                  <td className="p-2" colSpan={2}>Total</td>
+                  <td className="p-2 text-right">−{d.riskTolerance.downPct}%</td>
+                  <td className="p-2 text-right">+{d.riskTolerance.upPct}%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            Confidence {d.riskTolerance.confidence}%: how firm the likely figure is. It drops as evidence beyond the normal spread of the
+            task hours adds up (risks, skipped answers, open questions, unfamiliar technology, team gaps).
+          </p>
+        </div>
+      )}
+
       {/* Effort by area */}
       <div className="bg-white border border-gray-200 rounded-lg p-6">
         <h3 className="text-xl font-bold text-gray-900 mb-4">📊 Effort by Area</h3>

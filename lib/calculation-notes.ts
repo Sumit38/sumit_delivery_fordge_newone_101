@@ -155,6 +155,17 @@ export const calculationNotes = {
 
   confidence(estimation: EstimationLike): CalcNote {
     const d = detailsOf(estimation);
+    const rt = d?.riskTolerance;
+    if (rt) {
+      return {
+        title: "Confidence",
+        lines: [
+          "From the risk tolerance of the approved architecture.",
+          `90% − 0.8 × the risk tolerance beyond the normal spread of the task hours (risks, skipped answers, open questions, unfamiliar technology, team gaps).`,
+          `Risk tolerance −${rt.downPct}% / +${rt.upPct}%; kept between 40% and 90% → ${estimation.confidence ?? "-"}%.`,
+        ],
+      };
+    }
     return {
       title: "Confidence",
       lines: [

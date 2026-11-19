@@ -16,6 +16,7 @@ import AboutPage from "@/components/AboutPage";
 import DownloadUseCaseButton from "@/components/DownloadUseCaseButton";
 import RequirementSelector from "@/components/RequirementSelector";
 import { EstimationTab } from "@/components/EstimationTab";
+import ArchitectureTab from "@/components/ArchitectureTab";
 import { PitchDeckTab } from "@/components/PitchDeckTab";
 import { getProposedManDays } from "@/lib/estimation-calculator";
 import { calculationNotes } from "@/lib/calculation-notes";
@@ -53,7 +54,7 @@ interface LatestAnalysis {
 export default function DashboardPage() {
   const router = useRouter();
   const [userEmail, setUserEmail] = useState("");
-  const [activeTab, setActiveTab] = useState<"analyze" | "refine" | "history" | "user-stories" | "proposed-estimation" | "estimation" | "generate-estimation" | "timeline" | "pitch-deck" | "about">("analyze");
+  const [activeTab, setActiveTab] = useState<"analyze" | "refine" | "history" | "user-stories" | "architecture" | "proposed-estimation" | "estimation" | "generate-estimation" | "timeline" | "pitch-deck" | "about">("analyze");
   const [refreshHistory, setRefreshHistory] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -435,6 +436,22 @@ export default function DashboardPage() {
               onClick={() => {
                 setIsTransitioning(true);
                 setTimeout(() => {
+                  setActiveTab("architecture");
+                  setIsTransitioning(false);
+                }, 300);
+              }}
+              className={`px-4 py-2 font-medium transition-colors whitespace-nowrap text-sm ${
+                activeTab === "architecture"
+                  ? "text-blue-600 border-b-2 border-blue-600"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              🏗️ Architecture
+            </button>
+            <button
+              onClick={() => {
+                setIsTransitioning(true);
+                setTimeout(() => {
                   setActiveTab("user-stories");
                   setIsTransitioning(false);
                 }, 300);
@@ -705,6 +722,7 @@ export default function DashboardPage() {
                 requirementText={latestAnalysis.requirementText}
                 complexityLevel={latestAnalysis.complexityLevel}
                 analysisId={latestAnalysis.id}
+                onOpenArchitecture={() => setActiveTab("architecture")}
               />
             ) : (
               <div className="p-6 bg-white rounded-lg border border-slate-200 shadow-sm">
@@ -727,6 +745,27 @@ export default function DashboardPage() {
               </div>
             )}
           </div>
+        ) : activeTab === "architecture" ? (
+          <div>
+            {latestAnalysis ? (
+              <ArchitectureTab
+                key={latestAnalysis.id}
+                requirementId={latestAnalysis.id!}
+                requirementTitle={latestAnalysis.title || "Untitled"}
+                onOpenEstimation={() => setActiveTab("generate-estimation")}
+              />
+            ) : (
+              <div className="p-6 bg-white rounded-lg border border-slate-200 shadow-sm">
+                <p className="text-slate-600">
+                  No analysis selected yet. Please pick an analysis in the{" "}
+                  <button onClick={() => setActiveTab("history")} className="text-blue-600 hover:text-blue-700 font-semibold">
+                    Analysis History
+                  </button>{" "}
+                  tab to design its architecture.
+                </p>
+              </div>
+            )}
+          </div>
         ) : activeTab === "generate-estimation" ? (
           <div>
             {latestAnalysis ? (
@@ -735,6 +774,7 @@ export default function DashboardPage() {
                 complexityScore={latestAnalysis.complexityScore}
                 paths={latestAnalysis.paths}
                 testScenarios={latestAnalysis.testScenarios}
+                onOpenArchitecture={() => setActiveTab("architecture")}
                 onEstimationComplete={(estimation) => {
                   setLatestAnalysis({
                     ...latestAnalysis,

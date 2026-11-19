@@ -21,10 +21,14 @@ import {
   type TeamAnswers,
   type TestingAnswers,
 } from "@/lib/estimation-team";
+import type { EstimationHints } from "@/lib/architecture-estimation-hints";
 
 interface EstimationQuestionsFormProps {
   complexityScore: number;
   testScenarios?: number;
+  // From the approved architecture and its estimated hours: work areas, technologies to rate,
+  // suggested test types, needed roles and the environment answer
+  architecture?: EstimationHints;
   onSubmit: (answers: Record<string, any>) => Promise<void>;
   onCancel: () => void;
 }
@@ -32,6 +36,10 @@ interface EstimationQuestionsFormProps {
 // Step 1 keeps the original project questions. "How many developers" (Q2) and
 // "testing level" (Q5) are now answered by the team and testing steps.
 const PROJECT_QUESTION_IDS = [1, 3, 4, 6, 7];
+// On an approved architecture: skill level (Q1) is set per role, technology familiarity (Q4) is
+// asked per technology and the risk tolerance (Q6) is calculated from the design
+const ARCH_PROJECT_QUESTION_IDS = [3, 7];
+const FAMILIARITY = ["Very Familiar", "Moderately Familiar", "New/Complex Stack"];
 const SENIORITIES: Seniority[] = ["Junior", "Mid", "Senior"];
 const STEPS = ["Project", "Development team", "Testing"];
 
@@ -43,6 +51,7 @@ const emptyRoles = (defs: RoleDef[], seniority: Seniority, involvement?: number)
 export function EstimationQuestionsForm({
   complexityScore,
   testScenarios,
+  architecture,
   onSubmit,
   onCancel,
 }: EstimationQuestionsFormProps) {
@@ -52,14 +61,22 @@ export function EstimationQuestionsForm({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const [workstreams, setWorkstreams] = useState<string[]>(["ui", "backend", "database"]);
+  const architectureAreas = architecture?.areas;
+  const [workstreams, setWorkstreams] = useState<string[]>(
+    architectureAreas?.length ? architectureAreas.map((a) => a.id) : ["ui", "backend", "database"]
+  );
+  const [techByTechnology, setTechByTechnology] = useState<Record<string, string>>(() =>
+    Object.fromEntries((architecture?.technologies || []).map((t) => [t.key, "Moderately Familiar"]))
+  );
   const [devRoles, setDevRoles] = useState<Roles>(() => emptyRoles(DEVELOPER_ROLES, "Mid"));
   const [supportRoles, setSupportRoles] = useState<Roles>(() => emptyRoles(SUPPORT_ROLES, "Mid", 0.5));
   const [testers, setTesters] = useState<Roles>(() => ({
     ...emptyRoles(TESTER_ROLES, "Mid"),
     manual: { count: 1, seniority: "Mid" },
   }));
-  const [testTypes, setTestTypes] = useState<string[]>(["Functional", "Regression", "UAT support"]);
+  const [testTypes, setTestTypes] = useState<string[]>(
+    architecture ? architecture.suggestedTests.map((t) => t.type) : ["Functional", "Regression", "UAT support"]
+  );
   const [automationCoverage, setAutomationCoverage] = useState(0.25);
   const [testCycles, setTestCycles] = useState(2);
   const [approach, setApproach] = useState<TestingAnswers["approach"]>("in-sprint");
@@ -67,7 +84,9 @@ export function EstimationQuestionsForm({
   const [testData, setTestData] = useState<TestingAnswers["testData"]>("available");
   const [defectBuffer, setDefectBuffer] = useState(0.2);
 
-  const projectQuestions = estimationQuestions.filter((q) => PROJECT_QUESTION_IDS.includes(q.id));
+  const projectQuestions = estimationQuestions.filter((q) =>
+    (architecture ? ARCH_PROJECT_QUESTION_IDS : PROJECT_QUESTION_IDS).includes(q.id)
+  );
   const developerCount = countRoles(devRoles);
   const testerCount = countRoles(testers);
   const scenarios = testScenarios || complexityScore;
@@ -142,6 +161,7 @@ export function EstimationQuestionsForm({
       5: `Custom: ${testTypes.length} test types`,
       team,
       testing,
+      ...(architecture ? { techByTechnology } : {}),
     };
     if (!includeBudget) delete payload[8];
 
@@ -337,6 +357,40 @@ export function EstimationQuestionsForm({
                 </label>
               </div>
               {projectQuestions.map((q, i) => renderQuestion(q, i + 1))}
+              {architecture && architecture.technologies.length > 0 && (
+                <div className="border-b pb-6">
+                  <div className="block text-lg font-semibold text-gray-800 mb-1">
+                    {projectQuestions.length + 1}. How familiar is your team with each technology in the architecture?
+                  </div>
+                  <span className="text-sm text-gray-500 mb-3 block">
+                    💡 Each component&apos;s hours are adjusted by its technology: Very familiar 0.9×, Moderately 1.0×, New 1.3×.
+                  </span>
+                  <div className="space-y-3">
+                    {architecture.technologies.map((t) => (
+                      <div key={t.key} className="p-3 rounded-lg border border-gray-200">
+                        <div className="flex flex-wrap items-baseline justify-between gap-2">
+                          <span className="font-medium text-gray-900">{t.key}</span>
+                          <span className="text-xs text-gray-500">
+                            {t.hours} h · {t.components.join(", ")}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {FAMILIARITY.map((level) =>
+                            chip(level, techByTechnology[t.key] === level, () => setTechByTechnology((prev) => ({ ...prev, [t.key]: level })))
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {architecture && (
+                <div className="text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg p-3">
+                  ⚖️ <strong>Risk tolerance</strong> is not chosen here: it is calculated from the approved architecture (its risk register,
+                  skipped answers, open questions, steps without a component, the spread of the task hours, technology familiarity and team
+                  gaps) and shown with its breakdown in the result.
+                </div>
+              )}
               {includeBudget && (
                 <div className="bg-blue-50 rounded-lg p-4">{renderQuestion(budgetQuestion, projectQuestions.length + 1)}</div>
               )}
@@ -347,12 +401,30 @@ export function EstimationQuestionsForm({
             <>
               <div>
                 <div className="text-lg font-semibold text-gray-800 mb-1">What kind of work does this solution need?</div>
-                <div className="text-sm text-gray-500 mb-3">
-                  💡 Development effort (M × 8 h) is shared across these areas, and each area needs someone who can do it.
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {WORKSTREAMS.map((w) => chip(w.label, workstreams.includes(w.id), () => setWorkstreams((p) => toggle(p, w.id))))}
-                </div>
+                {architectureAreas?.length ? (
+                  <>
+                    <div className="text-sm text-gray-500 mb-3">
+                      💡 Set by the approved architecture: each area&apos;s hours come from its components and the process steps they deliver.
+                      To change them, request a new architecture version.
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {WORKSTREAMS.filter((w) => architectureAreas.some((a) => a.id === w.id)).map((w) => (
+                        <span key={w.id} className="px-3 py-1.5 rounded-full text-sm bg-blue-600 text-white">
+                          {w.label} · {architectureAreas.find((a) => a.id === w.id)?.hours} h
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-sm text-gray-500 mb-3">
+                      💡 Development effort (M × 8 h) is shared across these areas, and each area needs someone who can do it.
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {WORKSTREAMS.map((w) => chip(w.label, workstreams.includes(w.id), () => setWorkstreams((p) => toggle(p, w.id))))}
+                    </div>
+                  </>
+                )}
               </div>
 
               <div>
@@ -363,6 +435,18 @@ export function EstimationQuestionsForm({
                 <div className="text-sm text-gray-500 mb-3">
                   💡 Enter how many of each type you have and how senior they are (Junior 1.5×, Mid 1.0×, Senior 0.8× effort).
                 </div>
+                {architecture && architecture.roleNeeds.length > 0 && (
+                  <div className="text-sm text-blue-900 bg-blue-50 border border-blue-200 rounded p-3 mb-3">
+                    The architecture needs:{" "}
+                    {architecture.roleNeeds.map((r, i) => (
+                      <span key={r.area}>
+                        {i > 0 && "; "}
+                        <strong>{r.area}</strong> ({r.hours} h) → {r.roles.join(" or ")}
+                      </span>
+                    ))}
+                    . Areas without a matching developer are flagged in the result.
+                  </div>
+                )}
                 {roleTable(DEVELOPER_ROLES, devRoles, setDevRoles)}
               </div>
 
@@ -385,6 +469,12 @@ export function EstimationQuestionsForm({
 
               <div>
                 <div className="text-lg font-semibold text-gray-800 mb-1">Which kinds of testing are needed?</div>
+                {architecture && (
+                  <div className="text-sm text-gray-500">
+                    💡 Pre-selected from the architecture:{" "}
+                    {architecture.suggestedTests.map((t) => `${t.type} (${t.reason})`).join("; ")}. Change as needed.
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-2 mt-3">
                   {TEST_TYPES.map((t) => chip(t, testTypes.includes(t), () => setTestTypes((p) => toggle(p, t))))}
                 </div>
@@ -417,6 +507,9 @@ export function EstimationQuestionsForm({
                 { value: "after-dev", label: "After development, as a separate phase" },
               ])}
 
+              {architecture?.environmentAnswer && (
+                <div className="text-sm text-gray-600 -mb-4">💡 From the architecture Q&amp;A: {architecture.environmentAnswer}</div>
+              )}
               {choice("Is a test environment available?", environment, setEnvironment, [
                 { value: "ready", label: "Yes, dedicated and ready" },
                 { value: "shared", label: "Shared with other teams" },

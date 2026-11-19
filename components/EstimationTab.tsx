@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { estimationHints, type EstimationHints } from "@/lib/architecture-estimation-hints";
 import { authFetch } from "@/lib/auth-fetch";
 import { supabase } from "@/lib/supabase";
 import { EstimationQuestionsForm } from "./EstimationQuestionsForm";
@@ -13,6 +14,7 @@ interface EstimationTabProps {
   testScenarios?: number;
   onEstimationComplete?: (estimation: any) => void;
   onViewHistory?: () => void;
+  onOpenArchitecture?: () => void;
 }
 
 export function EstimationTab({
@@ -22,8 +24,43 @@ export function EstimationTab({
   testScenarios,
   onEstimationComplete,
   onViewHistory,
+  onOpenArchitecture,
 }: EstimationTabProps) {
   const [showForm, setShowForm] = useState(false);
+  // The estimation is made on the approved architecture of this requirement
+  const [architecture, setArchitecture] = useState<EstimationHints | null>(null);
+  const [archState, setArchState] = useState<"loading" | "ready" | "missing" | "no-hours" | "error">("loading");
+  const [approvedVersion, setApprovedVersion] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setArchState("loading");
+    authFetch(`/api/architecture?requirementId=${encodeURIComponent(requirementId)}`)
+      .then(async (r) => {
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || "failed");
+        if (cancelled) return;
+        if (!data.approved) {
+          setArchitecture(null);
+          setArchState("missing");
+          return;
+        }
+        setApprovedVersion(data.approved.version);
+        if (!data.approved.effort?.tasks?.length) {
+          setArchitecture(null);
+          setArchState("no-hours");
+          return;
+        }
+        setArchitecture(estimationHints(data.approved.version, data.approved.design, data.approved.answers || [], data.approved.effort));
+        setArchState("ready");
+      })
+      .catch(() => {
+        if (!cancelled) setArchState("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [requirementId]);
   const [estimation, setEstimation] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -111,6 +148,34 @@ export function EstimationTab({
     );
   }
 
+  if (archState === "loading") {
+    return <div className="p-6 text-gray-600">Checking the approved architecture…</div>;
+  }
+
+  if (archState !== "ready") {
+    return (
+      <div className="p-6">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 max-w-2xl">
+          <h2 className="text-xl font-bold text-gray-900 mb-2">
+            {archState === "no-hours" ? "⏱ Estimate the architecture's hours first" : "🏗️ Approve an architecture first"}
+          </h2>
+          <p className="text-gray-700 mb-4">
+            {archState === "error"
+              ? "The architecture of this requirement could not be checked. Please try again."
+              : archState === "no-hours"
+                ? `Architecture v${approvedVersion} is approved, but its build hours are not estimated yet. On the Architecture tab, click "Estimate hours from this architecture", review or edit the hours, then come back.`
+                : "Estimations are made on an approved technical architecture and its estimated build hours, so every development hour traces to a task of a component and the process steps it delivers. Answer the architecture questions, review the design and approve it."}
+          </p>
+          {onOpenArchitecture && (
+            <button onClick={onOpenArchitecture} className="px-5 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700">
+              Go to Architecture →
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (estimation) {
     return (
       <div className="p-6">
@@ -135,6 +200,13 @@ export function EstimationTab({
             Create a detailed project estimation based on the complexity score of{" "}
             <span className="font-bold text-blue-600">{complexityScore}</span>.
           </p>
+          {architecture && (
+            <p className="text-sm text-green-800 bg-green-50 border border-green-200 rounded px-3 py-2 mb-3">
+              ✅ Based on approved architecture v{architecture.version}: {architecture.componentCount} components,{" "}
+              {Math.round(architecture.likely)} h likely build hours ({Math.round(architecture.low)}–{Math.round(architecture.high)} h) before
+              team seniority and technology familiarity.
+            </p>
+          )}
           <p className="text-gray-600 mb-6">
             Answer questions in three steps: the project, the team you have
             (which developers, how many, how senior) and how you will test.
@@ -178,6 +250,7 @@ export function EstimationTab({
         <EstimationQuestionsForm
           complexityScore={complexityScore}
           testScenarios={testScenarios || (paths ? paths * 2 : undefined)}
+          architecture={architecture || undefined}
           onSubmit={handleGenerateEstimation}
           onCancel={() => setShowForm(false)}
         />

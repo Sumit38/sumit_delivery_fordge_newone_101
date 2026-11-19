@@ -19,6 +19,14 @@ interface UserStory {
   persona?: string;
   sprint?: number | null;
   dependsOn?: string[];
+  // Architecture components (ids) the story builds, when made on an approved architecture
+  components?: string[];
+}
+
+interface ArchInfo {
+  designId: string;
+  version: number;
+  components: Array<{ id: string; name: string }>;
 }
 
 interface PlanningSession {
@@ -35,11 +43,12 @@ interface UserStoriesProps {
   requirementText: string;
   complexityLevel: string;
   analysisId?: string;
+  onOpenArchitecture?: () => void;
 }
 
 type EstimationMethod = "fibonacci" | "planning-poker" | "tshirt";
 
-export default function SuggestiveUserStories({ requirementText, complexityLevel, analysisId }: UserStoriesProps) {
+export default function SuggestiveUserStories({ requirementText, complexityLevel, analysisId, onOpenArchitecture }: UserStoriesProps) {
   const [stories, setStories] = useState<UserStory[]>([]);
   const [summary, setSummary] = useState("");
   const [loading, setLoading] = useState(false);
@@ -54,6 +63,40 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
   const [sprintPlan, setSprintPlan] = useState<SprintPlan | null>(null);
   const [feedback, setFeedback] = useState("");
   const [refining, setRefining] = useState(false);
+  // The approved architecture now, and the one the shown stories were made on
+  const [arch, setArch] = useState<ArchInfo | null>(null);
+  const [archChecked, setArchChecked] = useState(false);
+  const [storiesArch, setStoriesArch] = useState<{ designId: string; version: number } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setArchChecked(false);
+    if (!analysisId) {
+      setArch(null);
+      setArchChecked(true);
+      return;
+    }
+    authFetch(`/api/architecture?requirementId=${encodeURIComponent(analysisId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        const a = data?.approved;
+        setArch(
+          a
+            ? {
+                designId: a.id,
+                version: a.version,
+                components: (a.design?.components || []).filter((c: any) => !c.external).map((c: any) => ({ id: c.id, name: c.name })),
+              }
+            : null
+        );
+      })
+      .catch(() => !cancelled && setArch(null))
+      .finally(() => !cancelled && setArchChecked(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [analysisId]);
 
   // Create a cache key
   const cacheKey = `stories_${Buffer.from(requirementText).toString('base64').substring(0, 50)}_${complexityLevel}`;
@@ -71,6 +114,7 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
         setSummary(parsed.summary);
         setSprintPlan(parsed.sprintPlan || null);
         setSession(parsed.session || null);
+        setStoriesArch(parsed.architecture || null);
         setView("stories");
         return;
       } catch (e) {
@@ -81,6 +125,7 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
     setSummary("");
     setSprintPlan(null);
     setSession(null);
+    setStoriesArch(null);
     setView("qa");
   }, [requirementText, complexityLevel]);
 
@@ -99,6 +144,7 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
         body: JSON.stringify({
           requirement: requirementText,
           complexity: complexityLevel,
+          requirementId: analysisId,
           ...(planned
             ? {
                 planningAnswers: options.planningAnswers,
@@ -132,6 +178,7 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
       setSummary(data.summary);
       setSprintPlan(data.sprintPlan || null);
       setSession(nextSession);
+      setStoriesArch(data.architecture || null);
       setView("stories");
       setFeedback("");
 
@@ -141,6 +188,7 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
         summary: data.summary,
         sprintPlan: data.sprintPlan || null,
         session: nextSession,
+        architecture: data.architecture || null,
       }));
       if (!planned) sessionStorage.removeItem(`${cacheKey}_qa`);
     } catch (err) {
@@ -267,6 +315,34 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
     );
   }
 
+  const inSync = Boolean(arch && storiesArch && arch.designId === storiesArch.designId);
+  const componentName = (id: string) => arch?.components.find((c) => c.id === id)?.name || id;
+  const uncovered = inSync && arch ? arch.components.filter((c) => !stories.some((s) => s.components?.includes(c.id))) : [];
+  const archBanner = !archChecked ? null : !arch ? (
+    <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 text-sm text-amber-900">
+      🏗️ No approved architecture yet: stories are written from the requirement only.{" "}
+      {onOpenArchitecture && (
+        <button type="button" onClick={onOpenArchitecture} className="font-semibold underline">
+          Approve one on the Architecture tab
+        </button>
+      )}{" "}
+      to keep them in sync with the components that will build them.
+    </div>
+  ) : stories.length && view === "stories" && !inSync ? (
+    <div className="p-3 rounded-lg border border-red-200 bg-red-50 text-sm text-red-900">
+      ⚠️ These stories were made {storiesArch ? `on architecture v${storiesArch.version}` : "before the architecture was approved"}; architecture v
+      {arch.version} is now approved. Generate the stories again (Change answers → generate, or Start planning Q&amp;A) to sync them.
+    </div>
+  ) : (
+    <div className="p-3 rounded-lg border border-green-200 bg-green-50 text-sm text-green-900">
+      🏗️ {view === "stories" && stories.length ? "In sync with" : "Stories will be written on"} approved architecture v{arch.version}
+      {" "}({arch.components.length} components): each story lists the components that build it.
+      {view === "stories" && uncovered.length > 0 && (
+        <span className="block mt-1 text-amber-800">Components without a story: {uncovered.map((c) => c.name).join(", ")}.</span>
+      )}
+    </div>
+  );
+
   const errorBox = error ? (
     <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
       <p className="text-red-700">❌ {error}</p>
@@ -277,6 +353,7 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
     return (
       <div className="space-y-4">
         {errorBox}
+        {archBanner}
         {stories.length > 0 && (
           <button type="button" onClick={() => setView("stories")} className="text-sm text-blue-600 hover:text-blue-800 font-semibold">
             ← Back to current stories
@@ -313,6 +390,7 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
   return (
     <div className="space-y-6">
       {errorBox}
+      {archBanner}
 
       {/* Planning session bar */}
       <div className="p-4 bg-white border border-slate-200 rounded-lg flex flex-wrap items-center gap-3">
@@ -534,6 +612,15 @@ export default function SuggestiveUserStories({ requirementText, complexityLevel
 
             {/* Description (always visible) */}
             <p className="text-xs text-slate-600 mb-2 italic">{story.description}</p>
+            {story.components && story.components.length > 0 && (
+              <div className="flex flex-wrap gap-1 mb-2">
+                {story.components.map((id) => (
+                  <span key={id} className="text-[11px] px-1.5 py-0.5 rounded bg-white border border-slate-300 text-slate-700">
+                    🧩 {componentName(id)}
+                  </span>
+                ))}
+              </div>
+            )}
 
             {/* Acceptance Criteria (expanded) */}
             {expandedStory === story.id && (

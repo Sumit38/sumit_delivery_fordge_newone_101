@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/require-user";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { Anthropic } from "@anthropic-ai/sdk";
+import { supabaseServer } from "@/lib/supabase-server";
+import { findingsOf, latestRound } from "@/lib/qa-status";
+import { buildUseCaseStructure } from "@/lib/use-case-flows";
+import { writeGraphUseCase } from "@/lib/use-case-graph";
 
 export const maxDuration = 120; // Vercel Hobby with Fluid compute allows up to 300 s
 
@@ -132,6 +136,98 @@ ${COMMON_RULES}
 - List every input field the actors enter in the main and alternative flows (up to 15). If the requirement names no fields, infer the fields the flow clearly needs and mark them "Assumed". Error messages must be clear and polite, and tell the user how to fix the input`;
 }
 
+async function askJson(prompt: string, maxTokens: number, timeout: number) {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY });
+  const response = await client.messages.create(
+    {
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: maxTokens,
+      temperature: 0,
+      messages: [{ role: "user", content: prompt }],
+    },
+    { timeout, maxRetries: 0 }
+  );
+  return parseJsonText(response.content.map((b) => (b.type === "text" ? b.text : "")).join(""));
+}
+
+// Use case built from the stored analysis graph: one extension per decision outcome,
+// traceability to every path and its 2 test scenarios. Returns null when the analysis
+// has no stored graph (older analyses), so the text-only use case is used instead.
+async function graphUseCase(analysisId: string, userId: string, fallbackText: string, fallbackTitle: string) {
+  const { data: requirement } = await supabaseServer
+    .from("requirements")
+    .select("id, title, document_text, complexity_results (analysis_data)")
+    .eq("id", analysisId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  const analysis = requirement?.complexity_results?.[0]?.analysis_data;
+  if (!analysis) return null;
+
+  const structure = buildUseCaseStructure(analysis.paths, analysis.edges);
+  if (!structure) return null;
+
+  const requirementText = latestRound(String(requirement?.document_text || fallbackText));
+  const title = String(requirement?.title || fallbackTitle || "Use case");
+  console.log(
+    `📄 Use case from graph: ${structure.mainRoute.length} main steps, ${structure.extensions.length} extensions, ${structure.coverage.paths} paths`
+  );
+
+  const budget = 105_000;
+  const [graph, value, fields] = await Promise.allSettled([
+    writeGraphUseCase({ requirement: requirementText, title, structure, budgetMs: budget }),
+    askJson(valuePrompt(requirementText.slice(0, 30_000)), 3000, budget),
+    askJson(fieldsPrompt(requirementText.slice(0, 30_000)), 3000, budget),
+  ]);
+  if (graph.status === "rejected") throw graph.reason;
+  const { frame, extensions } = graph.value;
+  const v = value.status === "fulfilled" ? value.value || {} : {};
+  const fv = fields.status === "fulfilled" ? fields.value || {} : {};
+  const list = (x: unknown) => (Array.isArray(x) ? x : []);
+  const { conflicts, gaps } = findingsOf(analysis);
+  const numbered = (steps: Array<{ actor: string; action: string }>) => steps.map((st, i) => ({ step: i + 1, ...st }));
+
+  return {
+    format: "graph",
+    useCaseTitle: frame.useCaseTitle,
+    description: frame.description,
+    trigger: frame.trigger,
+    primaryActor: frame.primaryActor,
+    secondaryActors: frame.secondaryActors,
+    stakeholders: frame.stakeholders,
+    preconditions: frame.preconditions,
+    mainSuccessScenario: frame.mainSteps,
+    mainAcceptanceCriteria: frame.mainAcceptanceCriteria,
+    mainPathId: structure.mainPathId,
+    extensions,
+    successPostconditions: frame.successPostconditions,
+    failurePostconditions: frame.failurePostconditions,
+    businessRules: frame.businessRules,
+    assumptions: frame.assumptions,
+    openQuestions: [...conflicts.map((c) => `Answer conflict: ${c}`), ...gaps.map((g) => `Requirement gap: ${g}`)].slice(0, 20),
+    traceability: structure.traceability,
+    coverage: structure.coverage,
+    wording: {
+      frame: frame.wording,
+      flowsByAI: extensions.filter((x) => x.wording === "AI").length,
+      flows: extensions.length,
+    },
+    // Same fields as the text-only use case, so older readers keep working
+    actors: [frame.primaryActor, ...frame.secondaryActors],
+    mainFlow: frame.mainSteps.map((st) => ({ step: st.step, actor: st.actor, action: st.action })),
+    alternativeFlows: extensions
+      .filter((x) => x.kind === "Alternative")
+      .map((x) => ({ name: `${x.label}. ${x.name}`, trigger: x.trigger, steps: numbered(x.steps) })),
+    exceptionFlows: extensions
+      .filter((x) => x.kind === "Exception")
+      .map((x) => ({ name: `${x.label}. ${x.name}`, trigger: x.trigger, resolution: x.steps.map((st) => st.action).join(" ") })),
+    postconditions: frame.successPostconditions,
+    businessValue: v.businessValue || "",
+    kpis: list(v.kpis),
+    nonFunctionalRequirements: list(v.nonFunctionalRequirements),
+    fieldValidations: list(fv.fieldValidations),
+  };
+}
+
 export async function POST(request: NextRequest) {
   const auth = await requireUser(request);
   if (auth.error) return auth.error;
@@ -139,13 +235,25 @@ export async function POST(request: NextRequest) {
   if (limited) return limited;
 
   try {
-    const { requirementText } = await request.json();
+    const body = await request.json();
+    const { requirementText } = body;
+    const analysisId = typeof body?.analysisId === "string" ? body.analysisId : "";
 
     if (!requirementText) {
       return NextResponse.json(
         { error: "Requirement text is required" },
         { status: 400 }
       );
+    }
+
+    // With a stored analysis graph: comprehensive use case covering every decision and path
+    if (analysisId) {
+      try {
+        const graphResult = await graphUseCase(analysisId, auth.userId, String(requirementText), String(body?.requirementTitle || ""));
+        if (graphResult) return NextResponse.json({ success: true, data: graphResult });
+      } catch (err) {
+        console.error("Graph use case failed, using the text use case:", err instanceof Error ? err.message : err);
+      }
     }
 
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY });

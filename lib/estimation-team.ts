@@ -1,3 +1,6 @@
+import type { ArchRisk, EffortSizing } from "./architecture-graph";
+import { riskTolerance, type RiskTolerance } from "./risk-tolerance";
+
 // Comprehensive estimation: team composition (which developers, how many,
 // how senior) and testing questions. Used when the estimation form sends
 // `team` and `testing` answers. Older estimations without them still use the
@@ -151,7 +154,52 @@ export interface ComprehensiveDetails {
   approach?: "in-sprint" | "after-dev";
   deadlineFactor?: number;
   formulas: string[];
+  // Present when development was sized from an approved architecture design.
+  // basis "tasks": the estimated task hours of the design (current). Older saved estimations
+  // were sized from graph points (hoursPerPoint / totalPoints / unassignedHours).
+  architecture?: {
+    designId: string;
+    version: number;
+    basis?: "tasks";
+    taskCount?: number;
+    edited?: boolean;
+    withoutTasks?: string[];
+    hoursPerPoint?: number;
+    totalPoints?: number;
+    unassignedHours?: number;
+    components: Array<{
+      id: string;
+      name: string;
+      type: string;
+      steps: number[];
+      hours: number; // likely hours after technology familiarity
+      points?: number;
+      technology?: string;
+      familiarity?: string;
+      tasks?: number;
+      low?: number;
+      likely?: number;
+      high?: number;
+    }>;
+  };
+  range?: { low: number; likely: number; high: number; rule: string };
+  riskTolerance?: RiskTolerance;
 }
+
+export interface ArchitectureEstimateInput {
+  designId: string;
+  version: number;
+  sizing: EffortSizing;
+  familiarity: Record<string, string>; // component id -> "Very Familiar" | "Moderately Familiar" | "New/Complex Stack"
+  evidence: { risks: ArchRisk[]; skippedAnswers: number; openQuestions: number; unassignedSteps: number };
+}
+
+// Technology familiarity per component (same factors as the original project question)
+export const FAMILIARITY_FACTOR: Record<string, number> = {
+  "Very Familiar": 0.9,
+  "Moderately Familiar": 1.0,
+  "New/Complex Stack": 1.3,
+};
 
 const roleLabel = (id: string) =>
   [...DEVELOPER_ROLES, ...SUPPORT_ROLES, ...TESTER_ROLES].find((r) => r.id === id)?.label || id;
@@ -175,6 +223,7 @@ export interface ComprehensiveInput {
   deadlineFactor: number;
   team: TeamAnswers;
   testing: TestingAnswers;
+  architecture?: ArchitectureEstimateInput;
 }
 
 export function calculateComprehensive(input: ComprehensiveInput) {
@@ -184,9 +233,24 @@ export function calculateComprehensive(input: ComprehensiveInput) {
   const has = (id: string) => (Number(roles[id]?.count) || 0) > 0;
 
   // ---------- Development ----------
-  const devBase = M * 8 * techFactor * riskFactor;
-  const needed = WORKSTREAMS.filter((w) => team.workstreams?.includes(w.id));
+  // With an approved architecture: hours are the likely task hours of each component × the team's
+  // familiarity with that component's technology; the work areas are the component types.
+  // Otherwise: M × 8 h × tech × risk, shared by weight across the selected areas.
+  const arch = input.architecture;
+  const archComponents = arch
+    ? arch.sizing.components.map((c) => {
+        const familiarity = arch.familiarity[c.id] || "Moderately Familiar";
+        return { ...c, familiarity, hours: c.likely * (FAMILIARITY_FACTOR[familiarity] ?? 1) };
+      })
+    : [];
+  const archByType: Record<string, number> = {};
+  for (const c of archComponents) archByType[c.type] = (archByType[c.type] || 0) + c.hours;
+  const devBase = arch ? archComponents.reduce((s, c) => s + c.hours, 0) : M * 8 * techFactor * riskFactor;
+  const needed = arch
+    ? WORKSTREAMS.filter((w) => (archByType[w.id] || 0) > 0)
+    : WORKSTREAMS.filter((w) => team.workstreams?.includes(w.id));
   const sumW = needed.reduce((s, w) => s + w.weight, 0) || 1;
+  const areaHours = (ws: WorkstreamDef) => (arch ? archByType[ws.id] || 0 : (devBase * ws.weight) / sumW);
   const devBuckets = new Map<string, { hours: number; tasks: Set<string> }>();
   const addDev = (role: string, hours: number, task: string) => {
     const b = devBuckets.get(role) || { hours: 0, tasks: new Set<string>() };
@@ -197,7 +261,7 @@ export function calculateComprehensive(input: ComprehensiveInput) {
   const workstreamRows: ComprehensiveDetails["workstreams"] = [];
 
   for (const ws of needed) {
-    const hours = (devBase * ws.weight) / sumW;
+    const hours = areaHours(ws);
     let staff = ws.primary.filter(has);
     let fallback = false;
     if (staff.length === 0) {
@@ -410,8 +474,29 @@ export function calculateComprehensive(input: ComprehensiveInput) {
   const totalEffort = round(devHours) + round(defectFixHours) + round(testingHours) + round(overheadHours);
   const totalPeople = countRoles(roles) + countRoles(testers) + countRoles(support);
 
+  // Risk tolerance from the design's evidence (architecture estimations only)
+  let tolerance: RiskTolerance | undefined;
+  if (arch) {
+    const built = archComponents.reduce((s, c) => s + c.likely, 0) || 1;
+    const share = (label: string) => archComponents.filter((c) => c.familiarity === label).reduce((s, c) => s + c.likely, 0) / built;
+    tolerance = riskTolerance({
+      likely: totalEffort,
+      taskSpread: { low: arch.sizing.low, likely: arch.sizing.likely, high: arch.sizing.high },
+      risks: arch.evidence.risks,
+      skippedAnswers: arch.evidence.skippedAnswers,
+      openQuestions: arch.evidence.openQuestions,
+      unassignedSteps: arch.evidence.unassignedSteps,
+      componentsWithoutTasks: arch.sizing.withoutTasks.length,
+      techShares: { newStack: share("New/Complex Stack"), moderate: share("Moderately Familiar") },
+      gaps,
+    });
+  }
+  const range = tolerance ? { low: tolerance.low, likely: tolerance.likely, high: tolerance.high, rule: tolerance.rule } : undefined;
+
   const formulas = [
-    `Development base = M(${M}) × 8 h × tech ${techFactor} × risk ${riskFactor} = ${round(devBase)} h, shared across the selected work areas by weight.`,
+    arch
+      ? `Development base = Σ components' likely task hours (${arch.sizing.likely} h, ${arch.sizing.taskCount} tasks in approved architecture v${arch.version}${arch.sizing.edited ? ", some edited by you" : ""}) × technology familiarity per component (Very 0.9, Moderate 1.0, New 1.3) = ${round(devBase)} h.`
+      : `Development base = M(${M}) × 8 h × tech ${techFactor} × risk ${riskFactor} = ${round(devBase)} h, shared across the selected work areas by weight.`,
     "Each developer's share is multiplied by seniority (Junior 1.5, Mid 1.0, Senior 0.8); a non-specialist covering an area takes 25% longer.",
     `Defect-fix buffer: ${Math.round(buffer * 100)}% of development = ${round(defectFixHours)} h.`,
     `Test scenarios = ${input.testScenarios ? "from the analysis" : input.paths ? "2 × paths" : "M"} = ${scenarios}; test cases = scenarios × ${TEST_CASES_PER_SCENARIO} = ${testCases} (positive, negative, edge).`,
@@ -421,6 +506,12 @@ export function calculateComprehensive(input: ComprehensiveInput) {
       : `Timeline = (max(development ${r1(devWeeks)} wk, in-sprint testing ${r1(inSprintWeeks)} wk) + end-phase testing ${r1(endPhaseWeeks)} wk) × deadline ${deadlineFactor}, rounded up.`,
     "Weeks per role = role hours ÷ (people in role × hours per week); the slowest role sets the pace.",
     "Support roles are counted by time: people × hours per week × involvement × timeline.",
+    ...(tolerance
+      ? [
+          `Risk tolerance −${tolerance.downPct}% / +${tolerance.upPct}% from the architecture's evidence: ${tolerance.contributors.map((c) => `${c.source} +${c.upPct}%${c.downPct ? ` / −${c.downPct}%` : ""}`).join("; ")}.`,
+          `Range: ${tolerance.low}–${tolerance.high} h; contingency to hold back: ${tolerance.contingencyHours} h.`,
+        ]
+      : []),
   ];
 
   const details: ComprehensiveDetails = {
@@ -446,6 +537,33 @@ export function calculateComprehensive(input: ComprehensiveInput) {
     approach: testing.approach === "after-dev" ? "after-dev" : "in-sprint",
     deadlineFactor,
     formulas,
+    ...(arch
+      ? {
+          architecture: {
+            designId: arch.designId,
+            version: arch.version,
+            basis: "tasks" as const,
+            taskCount: arch.sizing.taskCount,
+            edited: arch.sizing.edited,
+            withoutTasks: arch.sizing.withoutTasks,
+            components: archComponents.map((c) => ({
+              id: c.id,
+              name: c.name,
+              type: c.type,
+              steps: c.steps,
+              technology: c.technology,
+              familiarity: c.familiarity,
+              tasks: c.tasks,
+              low: c.low,
+              likely: c.likely,
+              high: c.high,
+              hours: round(c.hours),
+            })),
+          },
+          range,
+          riskTolerance: tolerance,
+        }
+      : {}),
   };
 
   return { totalEffort, timeline, devBase: round(devBase), details };

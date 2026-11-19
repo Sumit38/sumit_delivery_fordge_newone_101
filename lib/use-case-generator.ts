@@ -45,6 +45,37 @@ interface UseCaseQA {
     errorMessage: string;
     source?: string;
   }>;
+  // Graph-based use case (every decision outcome and path from the analysis)
+  format?: "graph";
+  trigger?: string;
+  primaryActor?: { name: string; role: string };
+  secondaryActors?: Array<{ name: string; role: string }>;
+  stakeholders?: Array<{ name: string; interest: string }>;
+  mainSuccessScenario?: Array<{ step: number; actor: string; action: string; rules?: string[] }>;
+  mainAcceptanceCriteria?: string[];
+  mainPathId?: string;
+  extensions?: Array<{
+    id: string;
+    label: string;
+    kind: "Alternative" | "Exception";
+    decision: string;
+    condition: string;
+    branchFromStep: number | null;
+    ending: string;
+    paths: string[];
+    name: string;
+    trigger: string;
+    steps: Array<{ actor: string; action: string }>;
+    acceptanceCriteria: string[];
+    rules: string[];
+  }>;
+  successPostconditions?: string[];
+  failurePostconditions?: string[];
+  businessRules?: Array<{ id: string; rule: string }>;
+  assumptions?: string[];
+  openQuestions?: string[];
+  traceability?: Array<{ pathId: string; route: string; flows: string[]; decisionOutcomes: string[]; tests: string[] }>;
+  coverage?: { decisions: number; outcomes: number; outcomesCovered: number; paths: number; pathsTraced: number; ok: boolean };
 }
 
 function esc(value: unknown): string {
@@ -117,6 +148,107 @@ function buildFieldValidationHtml(useCaseQA: UseCaseQA): string {
       <tr><th>ID</th><th>Screen</th><th>Field</th><th>Type</th><th>Mandatory</th><th>Validation Rules</th><th>Error Message</th><th>Source</th></tr>
       ${rows}
     </table>`;
+}
+
+// Body of the comprehensive (graph-based) use case. Sections are numbered as they appear;
+// empty sections are left out.
+export function buildGraphUseCaseBody(u: UseCaseQA): string {
+  let n = 0;
+  const section = (title: string, html: string) => (html ? `<div class="section"><h2>${++n}. ${esc(title)}</h2>${html}</div>` : "");
+  const ul = (items?: string[]) => (items && items.length ? `<ul>${items.map((i) => `<li>${esc(i)}</li>`).join("")}</ul>` : "");
+  const rulesTag = (rules?: string[]) => (rules && rules.length ? ` <span class="rule">${rules.map(esc).join(", ")}</span>` : "");
+  const criteria = (items?: string[]) =>
+    items && items.length ? `<p class="label">Acceptance criteria</p><ul class="ac">${items.map((i) => `<li>${esc(i)}</li>`).join("")}</ul>` : "";
+
+  const cov = u.coverage;
+  const coverageHtml = cov
+    ? `<div class="coverage ${cov.ok ? "ok" : "warn"}">
+        Built from the complexity analysis: covers <strong>${cov.outcomesCovered} of ${cov.outcomes}</strong> decision outcomes at
+        <strong>${cov.decisions}</strong> decision points and traces all <strong>${cov.pathsTraced}</strong> Start-to-End paths
+        to their test scenarios (2P = ${cov.paths * 2}).${u.mainPathId ? ` The main success scenario follows ${esc(u.mainPathId)}.` : ""}
+      </div>`
+    : "";
+
+  const actorsHtml = [
+    u.primaryActor ? `<p><strong>Primary actor:</strong> ${esc(u.primaryActor.name)}${u.primaryActor.role ? ` (${esc(u.primaryActor.role)})` : ""}</p>` : "",
+    u.secondaryActors?.length
+      ? `<p class="label">Secondary actors</p><ul>${u.secondaryActors.map((a) => `<li><strong>${esc(a.name)}:</strong> ${esc(a.role)}</li>`).join("")}</ul>`
+      : "",
+    u.stakeholders?.length
+      ? `<p class="label">Stakeholders and interests</p><table><tr><th>Stakeholder</th><th>Interest</th></tr>${u.stakeholders
+          .map((st) => `<tr><td>${esc(st.name)}</td><td>${esc(st.interest)}</td></tr>`)
+          .join("")}</table>`
+      : "",
+  ].join("");
+
+  const mainHtml = u.mainSuccessScenario?.length
+    ? `<ol>${u.mainSuccessScenario.map((st) => `<li><strong>${esc(st.actor)}:</strong> ${esc(st.action)}${rulesTag(st.rules)}</li>`).join("")}</ol>${criteria(u.mainAcceptanceCriteria)}`
+    : "";
+
+  const flowHtml = (kind: "Alternative" | "Exception") =>
+    (u.extensions || [])
+      .filter((x) => x.kind === kind)
+      .map(
+        (x) => `<div class="step ${kind === "Exception" ? "exception" : ""}">
+          <h3>${esc(x.label)}. ${esc(x.name)}</h3>
+          <p><strong>Trigger:</strong> ${esc(x.trigger)}</p>
+          <p class="meta">Branches ${x.branchFromStep ? `from main step ${x.branchFromStep}` : "inside another flow"} at "${esc(x.decision)}" when: ${esc(x.condition)}</p>
+          <ol>${x.steps.map((st) => `<li><strong>${esc(st.actor)}:</strong> ${esc(st.action)}</li>`).join("")}</ol>
+          <p><strong>Ends:</strong> ${esc(x.ending)}${rulesTag(x.rules)}</p>
+          ${criteria(x.acceptanceCriteria)}
+          ${x.paths.length ? `<p class="meta">Paths: ${x.paths.map(esc).join(", ")} · Test scenarios: ${x.paths.map((p) => `${esc(p)}+ / ${esc(p)}-`).join(", ")}</p>` : ""}
+        </div>`
+      )
+      .join("");
+
+  const postHtml = [
+    u.successPostconditions?.length ? `<p class="label">On success (success guarantees)</p>${ul(u.successPostconditions)}` : "",
+    u.failurePostconditions?.length ? `<p class="label">On failure or cancellation (minimal guarantees)</p>${ul(u.failurePostconditions)}` : "",
+  ].join("");
+
+  const rulesHtml = u.businessRules?.length
+    ? `<table><tr><th>ID</th><th>Business rule</th></tr>${u.businessRules.map((r) => `<tr><td>${esc(r.id)}</td><td>${esc(r.rule)}</td></tr>`).join("")}</table>`
+    : "";
+
+  const kpisHtml = u.kpis?.length
+    ? `<table><tr><th>Metric</th><th>Target Value</th><th>Current State</th></tr>${u.kpis
+        .map((k) => `<tr><td>${esc(k.metric)}</td><td>${esc(k.target)}</td><td>${esc(k.currentState)}</td></tr>`)
+        .join("")}</table>`
+    : "";
+
+  const openHtml = [
+    u.assumptions?.length ? `<p class="label">Assumptions (to confirm with the business)</p>${ul(u.assumptions)}` : "",
+    u.openQuestions?.length ? `<p class="label">Open questions from the analysis</p>${ul(u.openQuestions)}` : "",
+  ].join("");
+
+  const traceHtml = u.traceability?.length
+    ? `<p class="note">Each Start-to-End path of the analysis, the use case flows it goes through, and its two test scenarios.</p>
+      <table class="compact"><tr><th>Path</th><th>Route</th><th>Flows</th><th>Decision outcomes</th><th>Test scenarios</th></tr>${u.traceability
+        .map(
+          (t) =>
+            `<tr><td>${esc(t.pathId)}</td><td>${esc(t.route)}</td><td>${t.flows.map(esc).join(", ")}</td><td>${t.decisionOutcomes.map(esc).join("<br>") || "-"}</td><td>${t.tests.map(esc).join(", ")}</td></tr>`
+        )
+        .join("")}</table>`
+    : "";
+
+  return [
+    coverageHtml,
+    section("Description", u.description ? `<p>${esc(u.description)}</p>` : ""),
+    section("Trigger", u.trigger ? `<p>${esc(u.trigger)}</p>` : ""),
+    section("Actors & Stakeholders", actorsHtml),
+    section("Preconditions", ul(u.preconditions)),
+    section("Main Success Scenario", mainHtml),
+    section("Alternative Flows (Extensions)", flowHtml("Alternative")),
+    section("Exception Flows", flowHtml("Exception")),
+    section("Postconditions", postHtml),
+    section("Business Rules", rulesHtml),
+    section("Business Value", u.businessValue ? `<p>${esc(u.businessValue)}</p>` : ""),
+    section("Key Performance Indicators (KPIs)", kpisHtml),
+    section("Non-Functional Requirements", buildNfrHtml(u)),
+    section("Field Validations", buildFieldValidationHtml(u)),
+    section("Assumptions & Open Questions", openHtml),
+    section("Traceability Matrix", traceHtml),
+  ].join("\n");
 }
 
 export function buildUseCaseHTML(useCaseTitle: string, useCaseQA: UseCaseQA | null): string {
@@ -313,6 +445,17 @@ export function buildUseCaseHTML(useCaseTitle: string, useCaseQA: UseCaseQA | nu
             font-size: 12px;
             margin-bottom: 5px;
           }
+
+          .coverage { padding: 10px 12px; border-radius: 4px; font-size: 12px; margin-bottom: 10px; }
+          .coverage.ok { background: #e8f5e9; border-left: 4px solid #2e7d32; }
+          .coverage.warn { background: #fff8e1; border-left: 4px solid #f9a825; }
+          .label { font-weight: bold; font-size: 13px; margin-top: 12px; }
+          .meta { color: #666; font-size: 11px; margin-top: 6px; }
+          .rule { display: inline-block; padding: 0 5px; border-radius: 3px; background: #ede7f6; color: #4527a0; font-size: 10px; font-weight: bold; }
+          .step.exception { border-left-color: #c62828; }
+          .step h3 { margin-top: 0; }
+          .step { page-break-inside: avoid; }
+          ul.ac li { font-size: 12px; }
         </style>
       </head>
       <body>
@@ -323,7 +466,9 @@ export function buildUseCaseHTML(useCaseTitle: string, useCaseQA: UseCaseQA | nu
           </div>
 
           ${
-            useCaseQA
+            useCaseQA?.format === "graph"
+              ? buildGraphUseCaseBody(useCaseQA)
+              : useCaseQA
               ? `
           <div class="section">
             <h2>1. Description</h2>

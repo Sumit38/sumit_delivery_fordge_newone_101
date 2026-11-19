@@ -4,6 +4,9 @@ import { checkRateLimit } from "@/lib/rate-limit";
 import { supabaseServer } from "@/lib/supabase-server";
 import { calculateEstimation } from "@/lib/estimation-calculator";
 import { pruneUserHistory } from "@/lib/history-retention";
+import { approvedDesign } from "@/lib/architecture-store";
+import { effortSizing, technologyKey, traceability } from "@/lib/architecture-graph";
+import { FAMILIARITY_FACTOR } from "@/lib/estimation-team";
 
 export async function POST(request: NextRequest) {
   try {
@@ -38,6 +41,42 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // An estimation is made on an approved architecture design only
+    const approved = await approvedDesign(requirementId, userId);
+    if (!approved) {
+      return NextResponse.json(
+        { error: "Please approve an architecture design for this requirement first (Architecture tab).", needsArchitecture: true },
+        { status: 409 }
+      );
+    }
+    // ...with its build hours estimated (Architecture tab → Estimate hours)
+    if (!approved.effort?.tasks?.length) {
+      return NextResponse.json(
+        { error: `Please estimate the hours of approved architecture v${approved.version} first (Architecture tab).`, needsHours: true },
+        { status: 409 }
+      );
+    }
+    // Familiarity is answered per technology; each component takes its technology's answer
+    const byTech: Record<string, unknown> =
+      estimationAnswers.techByTechnology && typeof estimationAnswers.techByTechnology === "object" ? estimationAnswers.techByTechnology : {};
+    const familiarity: Record<string, string> = {};
+    for (const c of approved.design.components) {
+      const level = String(byTech[technologyKey(c)] ?? "");
+      familiarity[c.id] = level in FAMILIARITY_FACTOR ? level : "Moderately Familiar";
+    }
+    const architecture = {
+      designId: approved.id,
+      version: approved.version,
+      sizing: effortSizing(approved.design, approved.effort),
+      familiarity,
+      evidence: {
+        risks: approved.design.risks || [],
+        skippedAnswers: (approved.answers || []).filter((a) => !a.answer?.length).length,
+        openQuestions: (approved.design.openQuestions || []).length,
+        unassignedSteps: traceability(approved.design).unassigned.length,
+      },
+    };
+
     console.log("✅ [2/4] Request validation successful");
     console.log("🔍 [3/4] Calculating estimation...");
 
@@ -51,6 +90,7 @@ export async function POST(request: NextRequest) {
     const estimation = calculateEstimation(complexityScore, estimationAnswers, {
       paths: toCount(body.paths),
       testScenarios: toCount(body.testScenarios),
+      architecture,
     });
 
     console.log("✅ [3/4] Estimation calculated successfully");

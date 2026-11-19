@@ -8,6 +8,8 @@ import {
   sprintPlanningQuestions,
   type PlanningAnswers,
 } from "@/lib/story-planning";
+import { approvedDesign } from "@/lib/architecture-store";
+import type { ArchDesign } from "@/lib/architecture-graph";
 
 export const maxDuration = 120; // Vercel Hobby with Fluid compute allows up to 300 s
 
@@ -45,6 +47,43 @@ function uniqueId(raw: unknown, i: number, seen: Set<string>): string {
 }
 
 type Outline = { id: string; title: string; persona?: string; [key: string]: unknown };
+
+// The approved architecture of the requirement, when there is one: stories are written for its
+// components, and each story lists the components it builds
+interface ArchContext {
+  designId: string;
+  version: number;
+  ids: Set<string>;
+  prompt: string;
+  rule: string;
+}
+
+async function architectureContext(requirementId: unknown, userId: string): Promise<ArchContext | null> {
+  if (typeof requirementId !== "string" || !requirementId) return null;
+  const row = await approvedDesign(requirementId, userId).catch(() => null);
+  if (!row) return null;
+  const design = row.design as ArchDesign;
+  const built = design.components.filter((c) => !c.external);
+  if (!built.length) return null;
+  const external = design.components.filter((c) => c.external);
+  return {
+    designId: row.id,
+    version: row.version,
+    ids: new Set(built.map((c) => c.id)),
+    prompt: `
+APPROVED TECHNICAL ARCHITECTURE v${row.version} (the stories must be built on it):
+${design.summary}
+Components the team builds:
+${built.map((c) => `- ${c.id} ${c.name} [${c.type}] ${c.technology ? `(${c.technology})` : ""}: ${c.responsibilities}`).join("\n")}${
+      external.length ? `\nExternal systems (connected to, not built): ${external.map((c) => c.name).join(", ")}` : ""
+    }
+Key decisions: ${design.decisions.map((d) => `${d.decision}: ${d.choice}`).join("; ").slice(0, 1500) || "none"}`,
+    rule: `Each story lists "components": the ids (${built.map((c) => c.id).join(", ")}) of the architecture components that build it. Every component must appear in at least one story; use a Technical story for platform work (database, CI/CD, infrastructure) that has no user-facing story. Use the technologies and decisions of the architecture; do not invent other platforms.`,
+  };
+}
+
+const cleanComponents = (v: unknown, arch: ArchContext | null) =>
+  arch && Array.isArray(v) ? [...new Set(v.map((x) => String(x).trim().toUpperCase()).filter((x) => arch.ids.has(x)))] : undefined;
 type Detailed<T> = T & { description: string; acceptanceCriteria: string[] };
 
 // Step 1 writes a short outline (titles, points, priorities ...). Step 2 writes the
@@ -139,7 +178,7 @@ Respond with JSON only, no markdown:
   return { stories, summary };
 }
 
-async function generatePlannedStories(body: any) {
+async function generatePlannedStories(body: any, arch: ArchContext | null) {
   const answers: PlanningAnswers = body.planningAnswers;
   const extra: Array<{ question: string; answer: string }> = Array.isArray(body.questionAnswers)
     ? body.questionAnswers
@@ -163,7 +202,7 @@ COMPLEXITY LEVEL: ${body.complexity}
 SPRINT AND PROJECT ANSWERS:
 ${describePlanningAnswers(answers, sprintPlanningQuestions)}
 ${extra.length ? `\nANSWERS ABOUT THIS REQUIREMENT:\n${extra.map((qa) => `- ${qa.question}\n  Answer: ${qa.answer}`).join("\n")}` : ""}
-${feedback ? `\nTEAM FEEDBACK TO APPLY:\n${feedback}` : ""}`;
+${feedback ? `\nTEAM FEEDBACK TO APPLY:\n${feedback}` : ""}${arch ? arch.prompt : ""}`;
 
   const outlinePrompt = `You are a product owner planning user stories with a delivery team. Use the team's answers below; do not guess where they have answered.
 
@@ -179,10 +218,10 @@ RULES:
 4. "persona" is the user or role the story serves, using the team's answers.
 5. "dependsOn" lists ids of stories that must be done first (may be empty).
 6. Priority: Must-Have, Should-Have or Nice-to-Have. estimatedDays is the effort for one developer.
-7. Titles are short and specific. Do NOT write descriptions or acceptance criteria yet.
+7. Titles are short and specific. Do NOT write descriptions or acceptance criteria yet.${arch ? `\n8. ${arch.rule}` : ""}
 
 Respond with JSON only, no markdown:
-{"stories":[{"id":"US-001","priority":"Must-Have","type":"Functional","persona":"...","title":"...","storyPoints":3,"estimatedDays":1.5,"dependsOn":[]}],"summary":"..."}`;
+{"stories":[{"id":"US-001","priority":"Must-Have","type":"Functional","persona":"...","title":"...","storyPoints":3,"estimatedDays":1.5,"dependsOn":[]${arch ? ',"components":["C1"]' : ""}}],"summary":"..."}`;
 
   // Clean up: unique ids, Fibonacci points within the agreed size, known priorities
   const clean = (raw: any[]) => {
@@ -196,6 +235,7 @@ Respond with JSON only, no markdown:
       storyPoints: Math.min(toFibonacci(s.storyPoints), maxPoints),
       estimatedDays: Number(s.estimatedDays) || 1,
       dependsOn: Array.isArray(s.dependsOn) ? s.dependsOn.map(String) : [],
+      ...(arch ? { components: cleanComponents(s.components, arch) || [] } : {}),
     }));
   };
 
@@ -218,6 +258,7 @@ Respond with JSON only, no markdown:
     storyPoints: s.storyPoints,
     estimatedDays: s.estimatedDays,
     dependsOn: s.dependsOn,
+    ...(arch ? { components: (s as any).components || [] } : {}),
   }));
 
   const { stories: planned, plan } = allocateSprints(stories, velocity, sprintCount, answers.sprintLength);
@@ -227,6 +268,7 @@ Respond with JSON only, no markdown:
     stories: planned,
     summary: data.summary,
     sprintPlan: plan,
+    ...(arch ? { architecture: { designId: arch.designId, version: arch.version } } : {}),
   });
 }
 
@@ -247,9 +289,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const arch = await architectureContext(body.requirementId, auth.userId);
+
     // Answers from the Q&A session: build stories for the team's sprints
     if (body.planningAnswers && typeof body.planningAnswers === "object") {
-      return await generatePlannedStories(body);
+      return await generatePlannedStories(body, arch);
     }
 
     const outlinePrompt = `You are a product requirements expert. Plan comprehensive, actionable user stories for this requirement.
@@ -258,16 +302,17 @@ REQUIREMENT:
 ${requirement}
 
 COMPLEXITY LEVEL: ${complexity}
+${arch ? arch.prompt : ""}
 
 YOUR TASK:
 1. Plan 8-12 user stories that anyone can understand and work on
 2. Estimate story points (1-13 scale, fibonacci: 1,2,3,5,8,13) and estimatedDays
 3. Prioritize: Must-Have → Should-Have → Nice-to-Have
 4. Stories should cover: Core features, Edge cases, Error handling, Security, Performance
-5. Titles are short and specific. Do NOT write descriptions or acceptance criteria yet.
+5. Titles are short and specific. Do NOT write descriptions or acceptance criteria yet.${arch ? `\n6. ${arch.rule} Plan up to 15 stories if needed to cover every component.` : ""}
 
 RESPOND IN THIS EXACT JSON FORMAT (no markdown):
-{"stories":[{"id":"US-001","priority":"Must-Have","title":"Story title","storyPoints":5,"estimatedDays":2.5}],"summary":"Brief overview of all stories and coverage"}`;
+{"stories":[{"id":"US-001","priority":"Must-Have","title":"Story title","storyPoints":5,"estimatedDays":2.5${arch ? ',"components":["C1"]' : ""}}],"summary":"Brief overview of all stories and coverage"}`;
 
     const clean = (raw: any[]) => {
       const seen = new Set<string>();
@@ -277,13 +322,14 @@ RESPOND IN THIS EXACT JSON FORMAT (no markdown):
         title: String(s.title || "Untitled story"),
         storyPoints: Number(s.storyPoints) || 3,
         estimatedDays: Number(s.estimatedDays) || 1,
+        ...(arch ? { components: cleanComponents(s.components, arch) || [] } : {}),
       }));
     };
 
     const data = await generateInSteps({
       outlinePrompt,
       requirement: String(requirement),
-      context: `\nCOMPLEXITY LEVEL: ${complexity}`,
+      context: `\nCOMPLEXITY LEVEL: ${complexity}${arch ? arch.prompt : ""}`,
       criteriaRule: "3-5 testable statements per story",
       clean,
     });
@@ -298,8 +344,10 @@ RESPOND IN THIS EXACT JSON FORMAT (no markdown):
         acceptanceCriteria: s.acceptanceCriteria,
         storyPoints: s.storyPoints,
         estimatedDays: s.estimatedDays,
+        ...(arch ? { components: (s as any).components || [] } : {}),
       })),
       summary: data.summary,
+      ...(arch ? { architecture: { designId: arch.designId, version: arch.version } } : {}),
     });
   } catch (error) {
     console.error("❌ User stories generation error:", error);
